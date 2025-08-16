@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""
+Audio to WAV Converter
+
+Converts audio files (MP3, AAC, etc.) to high-quality WAV format
+optimized for professional audio editing and stem splitting.
+
+This is the first step in audio preprocessing for dubbing workflows.
+"""
+
+import sys
+import argparse
+import subprocess
+from pathlib import Path
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+
+def check_ffmpeg():
+    """Check if FFmpeg is available."""
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=10)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def get_audio_info(input_file):
+    """Get basic audio information using ffprobe."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_streams', '-select_streams', 'a:0', str(input_file)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            return None
+            
+        import json
+        data = json.loads(result.stdout)
+        
+        if not data.get('streams'):
+            return None
+            
+        stream = data['streams'][0]
+        return {
+            'codec': stream.get('codec_name', 'unknown'),
+            'sample_rate': int(stream.get('sample_rate', 0)),
+            'channels': int(stream.get('channels', 0)),
+            'duration': float(stream.get('duration', 0))
+        }
+    except Exception as e:
+        logger.error(f"Error getting audio info: {e}")
+        return None
+
+
+def generate_output_filename(input_file, output_dir=None, project_name=None,
+                           language=None, audio_type=None, version=None):
+    """
+    Generate a professional filename following dubbing conventions.
+
+    Args:
+        input_file: Path to input file
+        output_dir: Output directory (default: same as input)
+        project_name: Project name (default: extracted from input)
+        language: Language code (default: extracted or 'UNK')
+        audio_type: Audio type (default: 'MIX')
+        version: Version number (default: 'v01')
+
+    Returns:
+        Path object with generated filename
+    """
+    input_path = Path(input_file)
+
+    # Extract project name from filename if not provided
+    if not project_name:
+        # Remove common suffixes and clean up
+        name = input_path.stem
+        # Remove common patterns
+        for pattern in ['_audio', '_sound', '_track', '_final', '_master']:
+            name = name.replace(pattern, '')
+        project_name = name.replace(' ', '').replace('-', '_')
+
+    # Set defaults
+    language = language or 'UNK'
+    audio_type = audio_type or 'MIX'
+    version = version or 'v01'
+
+    # Generate filename: PROJECT_LANG_TYPE_wav_VERSION.wav
+    filename = f"{project_name}_{language}_{audio_type}_wav_{version}.wav"
+
+    # Determine output directory
+    if output_dir:
+        output_path = Path(output_dir)
+    else:
+        output_path = input_path.parent
+
+    return output_path / filename
+
+
+def convert_to_wav(input_file, output_file, sample_rate=48000, bit_depth=16,
+                   channels=None, overwrite=False, auto_name=False,
+                   project_name=None, language=None, audio_type=None, version=None):
+    """
+    Convert audio file to WAV format.
+
+    Args:
+        input_file: Path to input audio file
+        output_file: Path to output WAV file (ignored if auto_name=True)
+        sample_rate: Target sample rate (default: 48000 Hz)
+        bit_depth: Target bit depth (default: 16 bits)
+        channels: Target channels (None = keep original)
+        overwrite: Whether to overwrite existing output file
+        auto_name: Generate professional filename automatically
+        project_name: Project name for auto naming
+        language: Language code for auto naming
+        audio_type: Audio type for auto naming
+        version: Version for auto naming
+
+    Returns:
+        True if successful, False otherwise
+    """
+    input_path = Path(input_file)
+
+    # Generate output filename if auto_name is enabled
+    if auto_name:
+        # If output_file is a directory, use it; otherwise use its parent
+        output_dir = Path(output_file)
+        if not output_dir.is_dir() and output_file.endswith('/'):
+            # Create directory if it ends with /
+            output_dir.mkdir(parents=True, exist_ok=True)
+        elif not output_dir.is_dir():
+            output_dir = output_dir.parent
+
+        output_path = generate_output_filename(
+            input_file,
+            output_dir=output_dir,
+            project_name=project_name,
+            language=language,
+            audio_type=audio_type,
+            version=version
+        )
+        logger.info(f"Auto-generated filename: {output_path.name}")
+    else:
+        output_path = Path(output_file)
+    
+    # Check input file exists
+    if not input_path.exists():
+        logger.error(f"Input file not found: {input_path}")
+        return False
+    
+    # Check if output exists and overwrite flag
+    if output_path.exists() and not overwrite:
+        logger.error(f"Output file exists (use --overwrite to replace): {output_path}")
+        return False
+    
+    # Get input audio info
+    logger.info(f"Analyzing input file: {input_path.name}")
+    audio_info = get_audio_info(input_path)
+    
+    if not audio_info:
+        logger.error("Could not analyze input audio file")
+        return False
+    
+    logger.info(f"Input: {audio_info['codec']} | "
+               f"{audio_info['sample_rate']}Hz | "
+               f"{audio_info['channels']} channels | "
+               f"{audio_info['duration']:.1f}s")
+    
+    # Determine output channels
+    output_channels = channels if channels else audio_info['channels']
+    
+    # Build FFmpeg command
+    cmd = ['ffmpeg']
+    
+    # Input file
+    cmd.extend(['-i', str(input_path)])
+    
+    # Audio codec and format
+    if bit_depth == 16:
+        cmd.extend(['-acodec', 'pcm_s16le'])
+    elif bit_depth == 24:
+        cmd.extend(['-acodec', 'pcm_s24le'])
+    else:
+        logger.error(f"Unsupported bit depth: {bit_depth}")
+        return False
+    
+    # Sample rate
+    cmd.extend(['-ar', str(sample_rate)])
+    
+    # Channels
+    cmd.extend(['-ac', str(output_channels)])
+    
+    # Overwrite output
+    if overwrite:
+        cmd.append('-y')
+    
+    # Output file
+    cmd.append(str(output_path))
+    
+    # Execute conversion
+    logger.info(f"Converting to WAV: {bit_depth}-bit, {sample_rate}Hz, {output_channels} channels")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg conversion failed: {result.stderr}")
+            return False
+        
+        # Verify output file was created
+        if not output_path.exists():
+            logger.error("Output file was not created")
+            return False
+        
+        # Get output file size
+        size_mb = output_path.stat().st_size / (1024 * 1024)
+        
+        logger.info(f"✅ Conversion successful!")
+        logger.info(f"Output: {output_path}")
+        logger.info(f"Size: {size_mb:.1f} MB")
+        
+        return True
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Conversion timed out (file too large or system too slow)")
+        return False
+    except Exception as e:
+        logger.error(f"Conversion error: {e}")
+        return False
+
+
+def main():
+    """Main CLI interface."""
+    parser = argparse.ArgumentParser(
+        description="Convert audio files to WAV format for professional editing",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic conversion (recommended for dubbing)
+  ./convert_to_wav -i audio.mp3 -o audio.wav
+
+  # Professional naming (recommended)
+  ./convert_to_wav -i audio.mp3 -o processed/ --auto-name --project SherlockHolmes --language EN
+
+  # Full professional naming
+  ./convert_to_wav -i audio.mp3 -o processed/ --auto-name --project SherlockHolmes --language EN --type MIX --version v01
+
+  # Convert to mono with auto naming
+  ./convert_to_wav -i stereo.mp3 -o processed/ --auto-name --channels 1 --project MyProject --language ES
+
+Recommended settings for dubbing:
+  - Sample Rate: 48000 Hz (video standard)
+  - Bit Depth: 16 bits (sufficient for MP3 sources)
+  - Channels: Keep original (usually stereo)
+        """
+    )
+    
+    # Required arguments
+    parser.add_argument('-i', '--input', required=True,
+                       help='Input audio file (MP3, AAC, etc.)')
+    parser.add_argument('-o', '--output', required=True,
+                       help='Output WAV file or directory (for auto-naming)')
+    
+    # Optional arguments
+    parser.add_argument('--sample-rate', type=int, default=48000,
+                       help='Target sample rate in Hz (default: 48000)')
+    parser.add_argument('--bit-depth', type=int, choices=[16, 24], default=16,
+                       help='Target bit depth (default: 16)')
+    parser.add_argument('--channels', type=int, choices=[1, 2],
+                       help='Target channels (1=mono, 2=stereo, default=keep original)')
+    parser.add_argument('--overwrite', action='store_true',
+                       help='Overwrite output file if it exists')
+
+    # Professional naming options
+    parser.add_argument('--auto-name', action='store_true',
+                       help='Generate professional filename automatically')
+    parser.add_argument('--project', type=str,
+                       help='Project name for auto naming (e.g., SherlockHolmes)')
+    parser.add_argument('--language', type=str,
+                       help='Language code for auto naming (e.g., EN, ES, FR)')
+    parser.add_argument('--type', type=str, choices=['MIX', 'VOX', 'MNE', 'MUS', 'SFX'],
+                       help='Audio type for auto naming (default: MIX)')
+    parser.add_argument('--version', type=str,
+                       help='Version for auto naming (e.g., v01, v02)')
+
+    # Other options
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose logging')
+    
+    args = parser.parse_args()
+    
+    # Set logging level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Check dependencies
+    print("🎵 Audio to WAV Converter")
+    print("=" * 40)
+    
+    if not check_ffmpeg():
+        logger.error("FFmpeg not found. Please install FFmpeg.")
+        return 1
+    
+    # Perform conversion
+    success = convert_to_wav(
+        input_file=args.input,
+        output_file=args.output,
+        sample_rate=args.sample_rate,
+        bit_depth=args.bit_depth,
+        channels=args.channels,
+        overwrite=args.overwrite,
+        auto_name=args.auto_name,
+        project_name=args.project,
+        language=args.language,
+        audio_type=args.type,
+        version=args.version
+    )
+    
+    if success:
+        print("\n💡 Next steps:")
+        print("• Use the WAV file for further preprocessing")
+        print("• Consider noise reduction if needed")
+        print("• Proceed to stem splitting when ready")
+        return 0
+    else:
+        logger.error("Conversion failed")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -20,10 +20,9 @@ Analiza múltiples archivos de audio candidatos y recomienda el mejor para stem 
 
 ### **Paso 3: Preprocesamiento de Audio**
 ```bash
-# (En desarrollo)
-./03_preprocesar_audio/audio_preprocessor -i input.wav -o output.wav
+./03_preprocesar_audio/convert_to_wav -i audio.mp3 -o audio.wav
 ```
-Mejora la calidad del audio antes de la separación de pistas.
+Convierte el audio a WAV de alta calidad y aplica optimizaciones para stem splitting.
 
 ### **Paso 4: Separación de Pistas (Stem Splitting)**
 ```bash
@@ -57,7 +56,10 @@ Genera el audio final masterizado y listo para distribución.
 # 3. Analizar calidad de audio
 ./02_analizar_audios/audio_analyzer -i 00_sources/audio
 
-# 4. Continuar con el flujo según recomendaciones
+# 4. Preprocesar el archivo recomendado
+./03_preprocesar_audio/convert_to_wav -i 00_sources/audio/archivo_recomendado.mp3 -o 01_preproc/audio.wav
+
+# 5. Continuar con el flujo según recomendaciones
 ```
 
 ## 📋 Requisitos del Sistema
@@ -83,7 +85,7 @@ ffmpeg -version
 proyecto_doblaje/
 ├── 01_crear_estructura/     # Herramienta de creación de estructura
 ├── 02_analizar_audios/      # Sistema de análisis de calidad (v2.0)
-├── 03_preprocesar_audio/    # (En desarrollo)
+├── 03_preprocesar_audio/    # Preprocesamiento de audio (v1.0)
 ├── 04_separar_pistas/       # (En desarrollo)
 ├── 05_mezclar_audio/        # (En desarrollo)
 ├── 06_exportar_final/       # (En desarrollo)
@@ -94,7 +96,7 @@ proyecto_doblaje/
 
 - ✅ **Paso 1**: Creación de estructura - **Completado**
 - ✅ **Paso 2**: Análisis de audio - **Completado (v2.0)**
-- 🚧 **Paso 3**: Preprocesamiento - En desarrollo
+- ✅ **Paso 3**: Preprocesamiento - **Completado (v1.0)**
 - 🚧 **Paso 4**: Separación de pistas - En desarrollo
 - 🚧 **Paso 5**: Mezcla de audio - En desarrollo
 - 🚧 **Paso 6**: Exportación final - En desarrollo
@@ -105,6 +107,7 @@ Cada paso incluye su propia documentación completa:
 
 - [Paso 1: Crear Estructura](01_crear_estructura/README.md)
 - [Paso 2: Análisis de Audio](02_analizar_audios/README.md)
+- [Paso 3: Preprocesamiento](03_preprocesar_audio/README.md)
 
 ## 🤝 Contribución
 
