@@ -24,11 +24,11 @@ Preparar el audio seleccionado del Paso 2 para el proceso de separación de pist
 ```
 **Función:** Convierte cualquier formato de audio a WAV de alta calidad.
 
-### **2. Normalización** 🚧 (Próximamente)
+### **2. Normalización** ✅ (Implementado)
 ```bash
-./03_preprocesar_audio/normalize_audio -i audio.wav -o normalized.wav
+./03_preprocesar_audio/normalize_audio/normalize_audio -i audio.wav -o normalized.wav
 ```
-**Función:** Ajusta el volumen a niveles óptimos para stem splitting.
+**Función:** Ajusta el volumen a niveles óptimos para stem splitting usando EBU R128 conservador.
 
 ### **3. Reducción de Ruido** 🚧 (Próximamente)
 ```bash
@@ -195,6 +195,21 @@ SherlockHolmes_ES_MIX_final_v01.wav
 # 3. Proceder al stem splitting (Paso 4)
 ```
 
+### **Flujo Actual (Con Normalización)**
+```bash
+# 1. Analizar calidad
+./02_analizar_audios/audio_analyzer -i samples
+
+# 2. Convertir a WAV
+./03_preprocesar_audio/convert_to_wav -i samples/audio_recomendado.mp3 -o processed/audio.wav
+
+# 3. Normalizar para stem splitting
+./03_preprocesar_audio/normalize_audio/normalize_audio -i processed/audio.wav -o processed/normalized.wav
+
+# 4. Stem splitting
+./04_separar_pistas/stem_splitter -i processed/normalized.wav
+```
+
 ### **Flujo Completo (Futuro)**
 ```bash
 # 1. Analizar calidad
@@ -278,7 +293,7 @@ Una vez convertido a WAV:
 ## Estado del Desarrollo
 
 - ✅ **convert_to_wav** - Completado y probado
-- 🚧 **normalize_audio** - En desarrollo
+- ✅ **normalize_audio** - Completado y probado
 - 🚧 **remove_noise** - En desarrollo
 - 🚧 **enhance_voice** - En desarrollo
 - 🚧 **batch_preprocess** - En desarrollo

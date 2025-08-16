@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""
+Audio Normalizer for Preprocessing
+
+Normalizes audio levels using EBU R128 standard with conservative settings
+optimized for stem splitting preprocessing. Uses -23 LUFS target to preserve
+dynamics while providing stable signal levels.
+
+This is the second step in audio preprocessing for dubbing workflows.
+"""
+
+import sys
+import argparse
+import subprocess
+from pathlib import Path
+import logging
+import json
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+
+def check_ffmpeg():
+    """Check if FFmpeg is available and supports loudnorm filter."""
+    try:
+        # Check FFmpeg version
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return False
+            
+        # Check if loudnorm filter is available
+        result = subprocess.run(['ffmpeg', '-filters'], 
+                              capture_output=True, text=True, timeout=10)
+        return 'loudnorm' in result.stdout
+        
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def get_audio_info(input_file):
+    """Get basic audio information using ffprobe."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_streams', '-select_streams', 'a:0', str(input_file)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            return None
+            
+        data = json.loads(result.stdout)
+        
+        if not data.get('streams'):
+            return None
+            
+        stream = data['streams'][0]
+        return {
+            'codec': stream.get('codec_name', 'unknown'),
+            'sample_rate': int(stream.get('sample_rate', 0)),
+            'channels': int(stream.get('channels', 0)),
+            'duration': float(stream.get('duration', 0)),
+            'bit_rate': int(stream.get('bit_rate', 0)) if stream.get('bit_rate') else None
+        }
+    except Exception as e:
+        logger.error(f"Error getting audio info: {e}")
+        return None
+
+
+def analyze_loudness(input_file, duration=None):
+    """Analyze current loudness levels of the audio file."""
+    try:
+        cmd = [
+            'ffmpeg', '-i', str(input_file), '-af', 'loudnorm=print_format=json',
+            '-f', 'null', '-'
+        ]
+        
+        # Calculate timeout based on duration (minimum 60s, max 300s)
+        if duration:
+            timeout = min(max(60, int(duration * 0.5)), 300)
+        else:
+            timeout = 60
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        
+        # Extract JSON from stderr (FFmpeg outputs to stderr)
+        lines = result.stderr.split('\n')
+        json_start = -1
+        json_end = -1
+        
+        for i, line in enumerate(lines):
+            if line.strip() == '{':
+                json_start = i
+            elif line.strip() == '}' and json_start != -1:
+                json_end = i + 1
+                break
+        
+        if json_start == -1 or json_end == -1:
+            return None
+            
+        json_text = '\n'.join(lines[json_start:json_end])
+        loudness_data = json.loads(json_text)
+        
+        return {
+            'input_i': float(loudness_data.get('input_i', 0)),
+            'input_tp': float(loudness_data.get('input_tp', 0)),
+            'input_lra': float(loudness_data.get('input_lra', 0)),
+            'input_thresh': float(loudness_data.get('input_thresh', 0))
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing loudness: {e}")
+        return None
+
+
+def generate_output_filename(input_file, output_dir=None, project_name=None,
+                           language=None, audio_type=None, version=None):
+    """
+    Generate a professional filename following dubbing conventions.
+    
+    Args:
+        input_file: Path to input file
+        output_dir: Output directory (default: same as input)
+        project_name: Project name (default: extracted from input)
+        language: Language code (default: extracted or 'UNK')
+        audio_type: Audio type (default: 'MIX')
+        version: Version number (default: 'v01')
+    
+    Returns:
+        Path object with generated filename
+    """
+    input_path = Path(input_file)
+    
+    # Extract project name from filename if not provided
+    if not project_name:
+        # Remove common suffixes and clean up
+        name = input_path.stem
+        # Remove common patterns including previous processing steps
+        for pattern in ['_audio', '_sound', '_track', '_final', '_master', '_wav', '_normalized', '_norm']:
+            name = name.replace(pattern, '')
+        project_name = name.replace(' ', '').replace('-', '_')
+    
+    # Set defaults
+    language = language or 'UNK'
+    audio_type = audio_type or 'MIX'
+    version = version or 'v01'
+    
+    # Generate filename: PROJECT_LANG_TYPE_normalized_VERSION.wav
+    filename = f"{project_name}_{language}_{audio_type}_normalized_{version}.wav"
+    
+    # Determine output directory
+    if output_dir:
+        output_path = Path(output_dir)
+    else:
+        output_path = input_path.parent
+    
+    return output_path / filename
+
+
+def normalize_audio(input_file, output_file, overwrite=False, auto_name=False,
+                   project_name=None, language=None, audio_type=None, version=None,
+                   analyze_first=True, dry_run=False):
+    """
+    Normalize audio using EBU R128 standard with conservative preprocessing settings.
+    
+    Args:
+        input_file: Path to input audio file
+        output_file: Path to output normalized file (ignored if auto_name=True)
+        overwrite: Whether to overwrite existing output file
+        auto_name: Generate professional filename automatically
+        project_name: Project name for auto naming
+        language: Language code for auto naming
+        audio_type: Audio type for auto naming
+        version: Version for auto naming
+        analyze_first: Whether to analyze input loudness first
+        dry_run: Test processing without creating output file
+
+    Returns:
+        True if successful, False otherwise
+    """
+    input_path = Path(input_file)
+    
+    # Generate output filename if auto_name is enabled
+    if auto_name:
+        # If output_file is a directory, use it; otherwise use its parent
+        output_dir = Path(output_file)
+        if not output_dir.is_dir() and output_file.endswith('/'):
+            # Create directory if it ends with /
+            output_dir.mkdir(parents=True, exist_ok=True)
+        elif not output_dir.is_dir():
+            output_dir = output_dir.parent
+        
+        output_path = generate_output_filename(
+            input_file,
+            output_dir=output_dir,
+            project_name=project_name,
+            language=language,
+            audio_type=audio_type,
+            version=version
+        )
+        logger.info(f"Auto-generated filename: {output_path.name}")
+    else:
+        output_path = Path(output_file)
+    
+    # Check input file exists
+    if not input_path.exists():
+        logger.error(f"Input file not found: {input_path}")
+        return False
+    
+    # Check if output exists and overwrite flag (skip for dry run)
+    if not dry_run and output_path.exists() and not overwrite:
+        logger.error(f"Output file exists (use --overwrite to replace): {output_path}")
+        return False
+    
+    # Get input audio info
+    logger.info(f"Analyzing input file: {input_path.name}")
+    audio_info = get_audio_info(input_path)
+    
+    if not audio_info:
+        logger.error("Could not analyze input audio file")
+        return False
+    
+    logger.info(f"Input: {audio_info['codec']} | "
+               f"{audio_info['sample_rate']}Hz | "
+               f"{audio_info['channels']} channels | "
+               f"{audio_info['duration']:.1f}s")
+    
+    # Analyze current loudness if requested
+    if analyze_first:
+        logger.info("Analyzing current loudness levels...")
+        loudness_info = analyze_loudness(input_path, audio_info['duration'])
+        
+        if loudness_info:
+            logger.info(f"Current loudness: {loudness_info['input_i']:.1f} LUFS | "
+                       f"True Peak: {loudness_info['input_tp']:.1f} dBFS | "
+                       f"LRA: {loudness_info['input_lra']:.1f} LU")
+            
+            # Check if normalization is actually needed
+            target_lufs = -23.0
+            if abs(loudness_info['input_i'] - target_lufs) < 1.0:
+                logger.info("Audio is already well-normalized (within 1 LUFS of target)")
+                logger.info("Proceeding with normalization for consistency...")
+    
+    # Build FFmpeg command for normalization
+    cmd = ['ffmpeg']
+    
+    # Input file
+    cmd.extend(['-i', str(input_path)])
+    
+    # Apply loudnorm filter with conservative preprocessing settings
+    # Uses default values: I=-23, TP=-2, LRA=7 (conservative for stem splitting)
+    cmd.extend(['-af', 'loudnorm'])
+
+    # Overwrite output
+    if overwrite and not dry_run:
+        cmd.append('-y')
+
+    # Output file (use null output for dry run)
+    if dry_run:
+        cmd.extend(['-f', 'null', '-'])
+        logger.info("DRY RUN: Testing normalization without creating output file")
+    else:
+        cmd.append(str(output_path))
+    
+    # Execute normalization
+    logger.info("Normalizing audio with conservative settings (-23 LUFS target)...")
+    logger.info("This preserves dynamics for optimal stem splitting performance")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg normalization failed: {result.stderr}")
+            return False
+        
+        if dry_run:
+            logger.info(f"✅ Dry run successful!")
+            logger.info(f"Normalization would create: {output_path}")
+            logger.info("No output file was created (dry run mode)")
+        else:
+            # Verify output file was created
+            if not output_path.exists():
+                logger.error("Output file was not created")
+                return False
+
+            # Get output file size
+            size_mb = output_path.stat().st_size / (1024 * 1024)
+
+            logger.info(f"✅ Normalization successful!")
+            logger.info(f"Output: {output_path}")
+            logger.info(f"Size: {size_mb:.1f} MB")
+        
+        return True
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Normalization timed out (file too large or system too slow)")
+        return False
+    except Exception as e:
+        logger.error(f"Normalization error: {e}")
+        return False
+
+
+def main():
+    """Main CLI interface."""
+    parser = argparse.ArgumentParser(
+        description="Normalize audio levels for stem splitting preprocessing",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic normalization (recommended for stem splitting prep)
+  ./normalize_audio -i audio.wav -o normalized.wav
+
+  # Professional naming (recommended)
+  ./normalize_audio -i audio.wav -o processed/ --auto-name --project SherlockHolmes --language EN
+
+  # Skip initial analysis for faster processing
+  ./normalize_audio -i audio.wav -o normalized.wav --no-analyze
+
+  # Test normalization without creating output file
+  ./normalize_audio -i audio.wav -o normalized.wav --dry-run
+
+Normalization Settings:
+  - Target: -23 LUFS (conservative for preprocessing)
+  - True Peak: -2 dBFS (safe headroom)
+  - LRA: 7 LU (preserves dynamics)
+  
+This conservative approach preserves audio dynamics while providing
+stable levels optimal for stem splitting algorithms.
+        """
+    )
+    
+    # Required arguments
+    parser.add_argument('-i', '--input', required=True,
+                       help='Input audio file (preferably WAV)')
+    parser.add_argument('-o', '--output', required=True,
+                       help='Output normalized file or directory (for auto-naming)')
+    
+    # Optional arguments
+    parser.add_argument('--overwrite', action='store_true',
+                       help='Overwrite output file if it exists')
+    parser.add_argument('--no-analyze', action='store_true',
+                       help='Skip initial loudness analysis (faster processing)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Test normalization without creating output file')
+
+    # Professional naming options
+    parser.add_argument('--auto-name', action='store_true',
+                       help='Generate professional filename automatically')
+    parser.add_argument('--project', type=str,
+                       help='Project name for auto naming (e.g., SherlockHolmes)')
+    parser.add_argument('--language', type=str,
+                       help='Language code for auto naming (e.g., EN, ES, FR)')
+    parser.add_argument('--type', type=str, choices=['MIX', 'VOX', 'MNE', 'MUS', 'SFX'],
+                       help='Audio type for auto naming (default: MIX)')
+    parser.add_argument('--version', type=str,
+                       help='Version for auto naming (e.g., v01, v02)')
+    
+    # Other options
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose logging')
+    
+    args = parser.parse_args()
+    
+    # Set logging level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Check dependencies
+    print("🎚️  Audio Normalizer (Preprocessing)")
+    print("=" * 40)
+    
+    if not check_ffmpeg():
+        logger.error("FFmpeg not found or loudnorm filter not available.")
+        logger.error("Please install a recent version of FFmpeg.")
+        return 1
+    
+    # Perform normalization
+    success = normalize_audio(
+        input_file=args.input,
+        output_file=args.output,
+        overwrite=args.overwrite,
+        auto_name=args.auto_name,
+        project_name=args.project,
+        language=args.language,
+        audio_type=args.type,
+        version=args.version,
+        analyze_first=not args.no_analyze,
+        dry_run=args.dry_run
+    )
+    
+    if success:
+        print("\n💡 Next steps:")
+        print("• Audio is now normalized for optimal stem splitting")
+        print("• Consider noise reduction if background noise is present")
+        print("• Proceed to stem splitting when ready")
+        return 0
+    else:
+        logger.error("Normalization failed")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
