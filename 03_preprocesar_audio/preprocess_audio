@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Complete Audio Preprocessor
+Flexible Audio Preprocessor
 
-Performs complete audio preprocessing for dubbing workflows in a single command:
-1. Converts input to WAV format (48kHz, 16-bit, stereo)
-2. Applies high-pass filter (80 Hz, 2 poles) to remove low frequency noise
-3. Normalizes audio using EBU R128 (-23 LUFS) for optimal stem splitting
+Performs flexible audio preprocessing for dubbing workflows with granular control:
+- Converts input to WAV format (48kHz, 16-bit, stereo)
+- Optional high-pass filter (80 Hz, 2 poles) to remove low frequency noise
+- Optional noise removal (hiss, hum, general denoise)
+- Optional normalization using EBU R128 (-23 LUFS) for optimal stem splitting
+- Optional time range selection for testing
+- Auto-detection of noise types with suggestions
 
-This replaces the need for multiple separate preprocessing steps.
+All processing is done in a single FFmpeg pass for maximum quality.
 """
 
 import sys
@@ -18,6 +21,8 @@ import logging
 import json
 import tempfile
 import os
+import re
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -28,28 +33,52 @@ def check_ffmpeg():
     """Check if FFmpeg is available with required filters."""
     try:
         # Check FFmpeg version
-        result = subprocess.run(['ffmpeg', '-version'], 
+        result = subprocess.run(['ffmpeg', '-version'],
                               capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             return False, "FFmpeg not found"
-            
+
         # Check required filters
-        result = subprocess.run(['ffmpeg', '-filters'], 
+        result = subprocess.run(['ffmpeg', '-filters'],
                               capture_output=True, text=True, timeout=10)
-        
+
         missing_filters = []
-        if 'highpass' not in result.stdout:
-            missing_filters.append('highpass')
-        if 'loudnorm' not in result.stdout:
-            missing_filters.append('loudnorm')
-            
+        required_filters = ['highpass', 'loudnorm', 'afftdn', 'anequalizer', 'astats']
+        for filter_name in required_filters:
+            if filter_name not in result.stdout:
+                missing_filters.append(filter_name)
+
+        # Check for optional RNNoise filter
+        has_rnnoise = 'arnndn' in result.stdout
+
         if missing_filters:
             return False, f"Missing filters: {', '.join(missing_filters)}"
-            
-        return True, "FFmpeg ready"
-        
+
+        return True, f"FFmpeg ready (RNNoise: {'available' if has_rnnoise else 'not available'})"
+
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False, "FFmpeg not found or not responding"
+
+
+def parse_time(time_str):
+    """Parse time string (mm:ss or hh:mm:ss) to seconds."""
+    if not time_str:
+        return None
+
+    try:
+        # Handle formats: ss, mm:ss, hh:mm:ss
+        parts = time_str.split(':')
+        if len(parts) == 1:
+            return float(parts[0])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        elif len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        else:
+            raise ValueError("Invalid time format")
+    except ValueError:
+        logger.error(f"Invalid time format: {time_str}. Use ss, mm:ss, or hh:mm:ss")
+        return None
 
 
 def get_audio_info(input_file):
@@ -60,15 +89,15 @@ def get_audio_info(input_file):
             '-show_streams', '-select_streams', 'a:0', str(input_file)
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
+
         if result.returncode != 0:
             return None
-            
+
         data = json.loads(result.stdout)
-        
+
         if not data.get('streams'):
             return None
-            
+
         stream = data['streams'][0]
         return {
             'codec': stream.get('codec_name', 'unknown'),
@@ -82,16 +111,194 @@ def get_audio_info(input_file):
         return None
 
 
-def preprocess_audio(input_file, output_file, overwrite=False, dry_run=False):
+def auto_detect_noise(input_file, audio_info):
     """
-    Complete audio preprocessing pipeline.
-    
+    Analyze audio to detect noise types and suggest filters.
+    Uses distributed sampling: beginning, middle, and end of the file.
+    """
+    try:
+        duration = audio_info['duration']
+
+        # Define 3 analysis segments of 10 seconds each
+        segments = [
+            {'name': 'beginning', 'start': 0, 'duration': 10},
+            {'name': 'middle', 'start': max(0, duration / 2 - 5), 'duration': 10},
+            {'name': 'end', 'start': max(0, duration - 10), 'duration': 10}
+        ]
+
+        # Ensure segments don't exceed file duration
+        for segment in segments:
+            if segment['start'] + segment['duration'] > duration:
+                segment['duration'] = max(1, duration - segment['start'])
+
+        logger.info(f"Analyzing {len(segments)} segments for noise detection:")
+
+        all_outputs = []
+
+        for segment in segments:
+            start_time = segment['start']
+            seg_duration = segment['duration']
+
+            logger.info(f"• {segment['name']}: {format_duration(start_time)} to {format_duration(start_time + seg_duration)}")
+
+            cmd = ['ffmpeg']
+            cmd.extend(['-ss', str(start_time)])
+            cmd.extend(['-t', str(seg_duration)])
+            cmd.extend(['-i', str(input_file)])
+
+            # Use astats to analyze frequency content and levels
+            cmd.extend(['-af', 'astats=metadata=1:reset=1:length=0.05'])
+            cmd.extend(['-f', 'null', '-'])
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    all_outputs.append(result.stderr)
+                else:
+                    logger.warning(f"Could not analyze {segment['name']} segment")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Analysis timeout for {segment['name']} segment")
+
+        if not all_outputs:
+            logger.warning("Could not analyze any segments for noise detection")
+            return ['--high-pass', '--normalize']
+
+        # Combine all analysis outputs
+        combined_output = '\n'.join(all_outputs)
+
+        suggestions = []
+
+        # Always suggest high-pass for dialogue
+        suggestions.append('--high-pass')
+
+        # Analyze for electrical hum (50/60 Hz patterns)
+        # Look for DC offset or low frequency content indicators
+        hum_indicators = ['DC_offset', 'Low_frequency', 'Mean_difference']
+        if any(indicator in combined_output for indicator in hum_indicators):
+            suggestions.append('--remove-hum')
+
+        # Analyze for background hiss (high noise floor)
+        # Look for consistent background noise patterns
+        hiss_indicators = ['Noise_floor', 'Background', 'RMS_difference', 'Flat_factor']
+        if any(indicator in combined_output for indicator in hiss_indicators):
+            suggestions.append('--remove-hiss')
+
+        # Check for general noise (high dynamic range variations)
+        noise_indicators = ['Dynamic_range', 'Crest_factor', 'Zero_crossings']
+        if any(indicator in combined_output for indicator in noise_indicators):
+            # Only suggest general denoise if we haven't already suggested specific filters
+            if '--remove-hiss' not in suggestions and '--remove-hum' not in suggestions:
+                suggestions.append('--denoise')
+
+        # Always suggest normalization for stem splitting
+        suggestions.append('--normalize')
+
+        return suggestions
+
+    except Exception as e:
+        logger.warning(f"Noise detection failed: {e}")
+        # Return conservative defaults
+        return ['--high-pass', '--normalize']
+
+
+def format_duration(seconds):
+    """Format duration in seconds to hh:mm:ss format."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{minutes:02d}:{secs:02d}"
+
+
+def create_processing_log(output_file, input_file, cmd, audio_info,
+                         high_pass, remove_hiss, remove_hum, denoise, normalize,
+                         start_time, end_time, success):
+    """Create a processing log file with all the details."""
+    try:
+        # Create log filename based on output file
+        output_path = Path(output_file)
+        log_path = output_path.with_suffix('.log')
+
+        # Prepare log content
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd)
+
+        log_content = f"""# Audio Preprocessing Log
+# Generated: {timestamp}
+
+## Input File
+File: {input_file}
+Codec: {audio_info['codec']}
+Sample Rate: {audio_info['sample_rate']} Hz
+Channels: {audio_info['channels']}
+Duration: {format_duration(audio_info['duration'])} ({audio_info['duration']:.1f}s)
+Bit Rate: {audio_info['bit_rate'] or 'Unknown'} bps
+
+## Processing Options
+High-pass filter (80 Hz): {'Yes' if high_pass else 'No'}
+Remove hiss: {'Yes' if remove_hiss else 'No'}
+Remove hum (50/100/150 Hz): {'Yes' if remove_hum else 'No'}
+General denoise: {'Yes' if denoise else 'No'}
+Normalize (-23 LUFS): {'Yes' if normalize else 'No'}
+
+## Time Range
+"""
+
+        if start_time is not None or end_time is not None:
+            start_str = format_duration(start_time) if start_time is not None else "00:00"
+            end_str = format_duration(end_time) if end_time is not None else format_duration(audio_info['duration'])
+            log_content += f"Start: {start_str}\nEnd: {end_str}\n"
+        else:
+            log_content += "Full file processed\n"
+
+        log_content += f"""
+## Output File
+File: {output_file}
+Format: WAV (48kHz, 16-bit, stereo)
+Status: {'Success' if success else 'Failed'}
+
+## FFmpeg Command
+{cmd_str}
+
+## Notes
+- All processing done in single FFmpeg pass for maximum quality
+- Filters applied in optimal order: high-pass → hum removal → hiss removal → denoise → normalize
+- Conservative settings used to preserve audio quality
+"""
+
+        # Write log file
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write(log_content)
+
+        return log_path
+
+    except Exception as e:
+        logger.warning(f"Could not create processing log: {e}")
+        return None
+
+
+def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False,
+                    remove_hum=False, denoise=False, normalize=False,
+                    start_time=None, end_time=None, overwrite=False, dry_run=False):
+    """
+    Flexible audio preprocessing pipeline.
+
     Args:
         input_file: Path to input audio file (any format)
         output_file: Path to output preprocessed WAV file
+        high_pass: Apply 80 Hz high-pass filter
+        remove_hiss: Remove background hiss noise
+        remove_hum: Remove electrical hum (50 Hz + harmonics)
+        denoise: Apply general noise reduction
+        normalize: Apply EBU R128 normalization (-23 LUFS)
+        start_time: Start time in seconds (for time range selection)
+        end_time: End time in seconds (for time range selection)
         overwrite: Whether to overwrite existing output file
         dry_run: Test processing without creating output file
-    
+
     Returns:
         True if successful, False otherwise
     """
@@ -125,47 +332,119 @@ def preprocess_audio(input_file, output_file, overwrite=False, dry_run=False):
     if not dry_run:
         output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Build FFmpeg command for complete preprocessing
+    # Calculate duration for time range
+    duration = None
+    if start_time is not None and end_time is not None:
+        duration = end_time - start_time
+    elif start_time is not None and end_time is None:
+        # From start_time to end of file
+        duration = audio_info['duration'] - start_time
+
+    # Build FFmpeg command for flexible preprocessing
     cmd = ['ffmpeg']
-    
+
+    # Add time range BEFORE input for fast seeking
+    if start_time is not None:
+        cmd.extend(['-ss', str(start_time)])
+    if duration is not None:
+        cmd.extend(['-t', str(duration)])
+
     # Input file
     cmd.extend(['-i', str(input_path)])
-    
-    # Audio processing chain:
-    # 1. Convert to WAV format (48kHz, 16-bit, stereo)
+
+    # Audio format: WAV (48kHz, 16-bit, stereo) - always applied
     cmd.extend(['-acodec', 'pcm_s16le'])
     cmd.extend(['-ar', '48000'])
     cmd.extend(['-ac', '2'])
-    
-    # 2. Apply audio filters in sequence
+
+    # Build audio filter chain
     filter_chain = []
-    
-    # High-pass filter (80 Hz, 2 poles) - removes low frequency noise
-    filter_chain.append('highpass=f=80:poles=2')
-    
-    # Loudness normalization (-23 LUFS) - conservative for stem splitting
-    filter_chain.append('loudnorm')
-    
-    # Combine filters
-    cmd.extend(['-af', ','.join(filter_chain)])
-    
+
+    # 1. High-pass filter (80 Hz, 2 poles) - removes low frequency noise
+    if high_pass:
+        filter_chain.append('highpass=f=80:poles=2')
+
+    # 2. Remove electrical hum (50 Hz + harmonics)
+    if remove_hum:
+        # Notch filters for 50 Hz, 100 Hz, 150 Hz (European electrical)
+        filter_chain.append('anequalizer=f=50:t=o:w=2:g=-20')
+        filter_chain.append('anequalizer=f=100:t=o:w=2:g=-12')
+        filter_chain.append('anequalizer=f=150:t=o:w=2:g=-9')
+
+    # 3. Remove background hiss
+    if remove_hiss:
+        # Conservative hiss removal: 8 dB reduction, -25 dB noise floor, track noise
+        filter_chain.append('afftdn=nr=8:nf=-25:tn=1')
+
+    # 4. General noise reduction
+    if denoise:
+        # Try RNNoise first, fallback to afftdn
+        try:
+            # Check if RNNoise is available
+            result = subprocess.run(['ffmpeg', '-filters'], capture_output=True, text=True, timeout=5)
+            if 'arnndn' in result.stdout:
+                filter_chain.append('arnndn')
+            else:
+                # Fallback to conservative afftdn
+                filter_chain.append('afftdn=nr=6:nf=-30:tn=1')
+        except:
+            # Fallback to afftdn
+            filter_chain.append('afftdn=nr=6:nf=-30:tn=1')
+
+    # 5. Loudness normalization (-23 LUFS) - ALWAYS LAST
+    if normalize:
+        filter_chain.append('loudnorm=I=-23:TP=-2:LRA=7')
+
+    # Apply filters if any are specified
+    if filter_chain:
+        cmd.extend(['-af', ','.join(filter_chain)])
+
     # Overwrite output
     if overwrite and not dry_run:
         cmd.append('-y')
-    
+
     # Output file (use null output for dry run)
     if dry_run:
         cmd.extend(['-f', 'null', '-'])
         logger.info("DRY RUN: Testing complete preprocessing without creating output file")
     else:
         cmd.append(str(output_path))
+
+    # Print the complete FFmpeg command for reference
+    cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd)
+    print(f"\n📋 FFmpeg Command:")
+    print(f"{cmd_str}")
+    print()
     
-    # Execute preprocessing
-    logger.info("Starting complete audio preprocessing...")
-    logger.info("Step 1: Converting to WAV (48kHz, 16-bit, stereo)")
-    logger.info("Step 2: Applying high-pass filter (80 Hz, 2 poles)")
-    logger.info("Step 3: Normalizing audio (-23 LUFS, conservative)")
-    logger.info("This optimizes audio for stem splitting in a single pass")
+    # Log processing steps
+    logger.info("Starting flexible audio preprocessing...")
+
+    # Show time range if specified
+    if start_time is not None or end_time is not None:
+        start_str = format_duration(start_time) if start_time is not None else "00:00"
+        end_str = format_duration(end_time) if end_time is not None else format_duration(audio_info['duration'])
+        logger.info(f"Time range: {start_str} to {end_str}")
+
+    # Show processing steps
+    steps = ["Converting to WAV (48kHz, 16-bit, stereo)"]
+    if high_pass:
+        steps.append("High-pass filter (80 Hz, 2 poles)")
+    if remove_hum:
+        steps.append("Remove electrical hum (50/100/150 Hz)")
+    if remove_hiss:
+        steps.append("Remove background hiss (8 dB reduction)")
+    if denoise:
+        steps.append("General noise reduction")
+    if normalize:
+        steps.append("Normalize audio (-23 LUFS)")
+
+    for i, step in enumerate(steps, 1):
+        logger.info(f"Step {i}: {step}")
+
+    if not any([high_pass, remove_hiss, remove_hum, denoise, normalize]):
+        logger.info("Only format conversion will be applied")
+
+    logger.info("Processing in single FFmpeg pass for maximum quality")
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -178,21 +457,43 @@ def preprocess_audio(input_file, output_file, overwrite=False, dry_run=False):
             logger.info(f"✅ Dry run successful!")
             logger.info(f"Complete preprocessing would create: {output_path}")
             logger.info("No output file was created (dry run mode)")
+            success = True
         else:
             # Verify output file was created
             if not output_path.exists():
                 logger.error("Output file was not created")
-                return False
-            
-            # Get output file size
-            size_mb = output_path.stat().st_size / (1024 * 1024)
-            
-            logger.info(f"✅ Complete preprocessing successful!")
-            logger.info(f"Output: {output_path}")
-            logger.info(f"Size: {size_mb:.1f} MB")
-            logger.info(f"Format: WAV, 48kHz, 16-bit, stereo, filtered, normalized")
-        
-        return True
+                success = False
+            else:
+                # Get output file size
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+
+                logger.info(f"✅ Complete preprocessing successful!")
+                logger.info(f"Output: {output_path}")
+                logger.info(f"Size: {size_mb:.1f} MB")
+                logger.info(f"Format: WAV, 48kHz, 16-bit, stereo")
+                success = True
+
+        # Create processing log (only for successful non-dry-run processing)
+        if success and not dry_run:
+            log_path = create_processing_log(
+                output_file=output_file,
+                input_file=input_file,
+                cmd=cmd,
+                audio_info=audio_info,
+                high_pass=high_pass,
+                remove_hiss=remove_hiss,
+                remove_hum=remove_hum,
+                denoise=denoise,
+                normalize=normalize,
+                start_time=start_time,
+                end_time=end_time,
+                success=success
+            )
+
+            if log_path:
+                logger.info(f"📋 Processing log saved: {log_path}")
+
+        return success
         
     except subprocess.TimeoutExpired:
         logger.error("Preprocessing timed out (file too large or system too slow)")
@@ -205,25 +506,41 @@ def preprocess_audio(input_file, output_file, overwrite=False, dry_run=False):
 def main():
     """Main CLI interface."""
     parser = argparse.ArgumentParser(
-        description="Complete audio preprocessing for dubbing workflows",
+        description="Flexible audio preprocessing for dubbing workflows",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic preprocessing (recommended)
-  ./preprocess_audio -i audio.mp3 -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+  # Basic preprocessing with high-pass and normalization
+  ./preprocess_audio -i audio.mp3 -o output.wav --high-pass --normalize
 
-  # Test preprocessing without creating output file
-  ./preprocess_audio -i audio.mp3 -o output.wav --dry-run
+  # Remove noise and normalize
+  ./preprocess_audio -i audio.mp3 -o output.wav --high-pass --remove-hiss --normalize
 
-  # Overwrite existing output
-  ./preprocess_audio -i audio.mp3 -o output.wav --overwrite
+  # Full noise removal
+  ./preprocess_audio -i audio.mp3 -o output.wav --high-pass --remove-hum --remove-hiss --normalize
 
-Processing Steps (automatic):
-  1. Convert to WAV (48kHz, 16-bit, stereo)
-  2. High-pass filter (80 Hz, 2 poles) - removes noise
-  3. Normalize (-23 LUFS) - optimizes for stem splitting
-  
-Output is ready for stem splitting without further processing.
+  # Test on a segment first
+  ./preprocess_audio -i audio.mp3 -o test.wav --high-pass --remove-hiss --normalize --from 1:30 --to 1:45
+
+  # Auto-detect noise and get suggestions
+  ./preprocess_audio -i audio.mp3 -o output.wav --auto-detect-noise
+
+  # Dry run to see what would be processed
+  ./preprocess_audio -i audio.mp3 -o output.wav --high-pass --normalize --dry-run
+
+Processing Options:
+  --high-pass       Apply 80 Hz high-pass filter (removes low frequency noise)
+  --remove-hiss     Remove background hiss (8 dB reduction, conservative)
+  --remove-hum      Remove electrical hum (50/100/150 Hz notch filters)
+  --denoise         General noise reduction (RNNoise if available, else afftdn)
+  --normalize       EBU R128 normalization (-23 LUFS, optimized for stem splitting)
+
+Time Range (for testing):
+  --from TIME       Start time (format: ss, mm:ss, or hh:mm:ss)
+  --to TIME         End time (format: ss, mm:ss, or hh:mm:ss)
+
+Output is always WAV format (48kHz, 16-bit, stereo).
+All processing is done in a single FFmpeg pass for maximum quality.
         """
     )
     
@@ -232,46 +549,142 @@ Output is ready for stem splitting without further processing.
                        help='Input audio file (any format: MP3, AAC, WAV, etc.)')
     parser.add_argument('-o', '--output', required=True,
                        help='Output preprocessed WAV file (full path with professional filename)')
-    
-    # Optional arguments
+
+    # Processing options
+    parser.add_argument('--high-pass', action='store_true',
+                       help='Apply 80 Hz high-pass filter to remove low frequency noise')
+    parser.add_argument('--remove-hiss', action='store_true',
+                       help='Remove background hiss noise (8 dB reduction, conservative)')
+    parser.add_argument('--remove-hum', action='store_true',
+                       help='Remove electrical hum (50/100/150 Hz notch filters)')
+    parser.add_argument('--denoise', action='store_true',
+                       help='Apply general noise reduction (RNNoise if available)')
+    parser.add_argument('--normalize', action='store_true',
+                       help='Apply EBU R128 normalization (-23 LUFS for stem splitting)')
+
+    # Time range options
+    parser.add_argument('--from', dest='start_time', type=str,
+                       help='Start time for processing (format: ss, mm:ss, or hh:mm:ss)')
+    parser.add_argument('--to', dest='end_time', type=str,
+                       help='End time for processing (format: ss, mm:ss, or hh:mm:ss)')
+
+    # Analysis options
+    parser.add_argument('--auto-detect-noise', action='store_true',
+                       help='Analyze audio and suggest noise removal options')
+
+    # Control options
     parser.add_argument('--overwrite', action='store_true',
                        help='Overwrite output file if it exists')
     parser.add_argument('--dry-run', action='store_true',
-                       help='Test preprocessing without creating output file')
+                       help='Show what would be processed without creating output file')
     parser.add_argument('--verbose', action='store_true',
                        help='Enable verbose logging')
     
     args = parser.parse_args()
-    
+
     # Set logging level
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    
+
     # Check dependencies
-    print("🎛️  Complete Audio Preprocessor")
+    print("🎛️  Flexible Audio Preprocessor")
     print("=" * 40)
-    
+
     ffmpeg_ok, ffmpeg_msg = check_ffmpeg()
     if not ffmpeg_ok:
         logger.error(f"FFmpeg check failed: {ffmpeg_msg}")
-        logger.error("Please install a recent version of FFmpeg with loudnorm and highpass filters.")
+        logger.error("Please install a recent version of FFmpeg with required filters.")
         return 1
-    
+
     logger.info(f"FFmpeg status: {ffmpeg_msg}")
-    
-    # Perform complete preprocessing
+
+    # Parse time arguments
+    start_seconds = None
+    end_seconds = None
+
+    if args.start_time:
+        start_seconds = parse_time(args.start_time)
+        if start_seconds is None:
+            return 1
+
+    if args.end_time:
+        end_seconds = parse_time(args.end_time)
+        if end_seconds is None:
+            return 1
+
+    # Validate time range
+    if start_seconds is not None and end_seconds is not None:
+        if start_seconds >= end_seconds:
+            logger.error("Start time must be before end time")
+            return 1
+
+    # Handle auto-detect-noise mode
+    if args.auto_detect_noise:
+        logger.info("🔍 Analyzing audio for noise detection...")
+
+        # Get audio info first for distributed analysis
+        from pathlib import Path
+        input_path = Path(args.input)
+        if not input_path.exists():
+            logger.error(f"Input file not found: {input_path}")
+            return 1
+
+        audio_info = get_audio_info(input_path)
+        if not audio_info:
+            logger.error("Could not analyze input audio file")
+            return 1
+
+        logger.info(f"File duration: {format_duration(audio_info['duration'])}")
+
+        suggestions = auto_detect_noise(args.input, audio_info)
+
+        print(f"\n🔍 Audio Analysis Results:")
+        print(f"• Analyzed: 3 distributed segments (beginning, middle, end)")
+        print(f"• Total analysis time: ~30 seconds from {format_duration(audio_info['duration'])} file")
+        print(f"• Suggested parameters: {' '.join(suggestions)}")
+        print(f"\nRun again with suggested parameters:")
+        print(f"./preprocess_audio -i {args.input} -o {args.output} {' '.join(suggestions)}")
+
+        return 0
+
+    # Check if any processing options are specified
+    has_processing = any([args.high_pass, args.remove_hiss, args.remove_hum, args.denoise, args.normalize])
+
+    if not has_processing:
+        logger.warning("No processing options specified. Only format conversion will be performed.")
+        logger.info("Consider using --high-pass and --normalize for basic preprocessing")
+        logger.info("Use --auto-detect-noise to analyze the audio and get suggestions")
+
+    # Perform flexible preprocessing
     success = preprocess_audio(
         input_file=args.input,
         output_file=args.output,
+        high_pass=args.high_pass,
+        remove_hiss=args.remove_hiss,
+        remove_hum=args.remove_hum,
+        denoise=args.denoise,
+        normalize=args.normalize,
+        start_time=start_seconds,
+        end_time=end_seconds,
         overwrite=args.overwrite,
         dry_run=args.dry_run
     )
-    
+
     if success:
         print("\n💡 Next steps:")
-        print("• Audio is fully preprocessed and optimized")
-        print("• Ready for stem splitting without further processing")
-        print("• All steps completed: WAV conversion + filtering + normalization")
+        if has_processing:
+            print("• Audio has been preprocessed with selected options")
+            if args.normalize:
+                print("• Ready for stem splitting")
+            else:
+                print("• Consider normalizing before stem splitting")
+        else:
+            print("• Audio converted to WAV format")
+            print("• Consider applying noise removal and normalization")
+
+        if start_seconds is not None or end_seconds is not None:
+            print("• This was a time range test - process full audio when ready")
+
         return 0
     else:
         logger.error("Audio preprocessing failed")

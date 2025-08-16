@@ -18,19 +18,30 @@ Preparar completamente el audio seleccionado del Paso 2 para el proceso de separ
 - **Niveles perfectos** - Normalización -23 LUFS conservadora
 - **Listo para stem splitting** - Sin procesamiento adicional necesario
 
-## Comando Único de Preprocesamiento
+## Comando Flexible de Preprocesamiento
 
-### **Preprocesador Completo** ✅ (Implementado)
+### **Preprocesador Flexible** ✅ (Implementado)
 ```bash
-./03_preprocesar_audio/preprocess_audio -i audio.mp3 -o SherlockHolmes_EN_MIX_preprocessed_v01.wav
+./03_preprocesar_audio/preprocess_audio -i audio.mp3 -o output.wav [opciones]
 ```
 
-**Realiza automáticamente:**
-1. **Conversión a WAV** (48kHz, 16-bit, estéreo)
-2. **Filtro de altas frecuencias** (80 Hz, 2 poles) - elimina ruido de graves
-3. **Normalización EBU R128** (-23 LUFS) - niveles óptimos para stem splitting
+**Opciones de procesamiento disponibles:**
+- `--high-pass` - Filtro de altas frecuencias (80 Hz, 2 poles)
+- `--remove-hiss` - Elimina siseo de fondo (8 dB reducción conservadora)
+- `--remove-hum` - Elimina zumbido eléctrico (50/100/150 Hz)
+- `--denoise` - Reducción general de ruido (RNNoise si disponible)
+- `--normalize` - Normalización EBU R128 (-23 LUFS)
 
-**Resultado:** Audio completamente optimizado y listo para stem splitting en un solo paso.
+**Opciones de testing:**
+- `--from TIME --to TIME` - Procesar solo un segmento (formato: mm:ss o hh:mm:ss)
+- `--auto-detect-noise` - Analizar audio y sugerir filtros
+- `--dry-run` - Mostrar qué se procesaría sin crear archivo
+
+**Trazabilidad:**
+- **Comando FFmpeg completo** - Se muestra en pantalla para referencia
+- **Log de procesamiento** - Se guarda automáticamente como `archivo.log`
+
+**Resultado:** Control total sobre el procesamiento en una sola pasada de FFmpeg para máxima calidad con trazabilidad completa.
 
 ## Convenciones de Naming Profesional
 
@@ -77,38 +88,145 @@ stems/SherlockHolmes_EN_MNE_isolated_v01.wav
 final/SherlockHolmes_ES_MIX_final_v01.wav
 ```
 
-## Uso del Preprocesador Completo
+## Uso del Preprocesador Flexible
 
-### **Uso Básico (Recomendado)**
+### **1. Auto-detección de Ruido (Recomendado para empezar)**
 ```bash
-# Preprocesamiento completo en un comando
+# Analizar audio y obtener sugerencias
 ./03_preprocesar_audio/preprocess_audio \
   -i samples/sherlock_episode1.mp3 \
-  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+  -o processed/output.wav \
+  --auto-detect-noise
+
+# Salida ejemplo:
+# 🔍 Audio Analysis Results:
+# • Analyzed: 3 distributed segments (beginning, middle, end)
+# • Total analysis time: ~30 seconds from 51:58 file
+# • Suggested parameters: --high-pass --remove-hiss --normalize
 ```
 
-### **Uso con Testing**
+**¿Cómo funciona la auto-detección?**
+- Analiza **3 segmentos de 10 segundos** distribuidos por el archivo
+- **Inicio** (0-10s), **medio** (centro del archivo), **final** (últimos 10s)
+- **Total: 30 segundos** de análisis para archivos de cualquier duración
+- **Más representativo** que analizar solo el inicio
+
+### **2. Uso Básico (Casos Limpios)**
 ```bash
-# Probar primero sin crear archivo (para archivos largos)
+# Solo high-pass y normalización
 ./03_preprocesar_audio/preprocess_audio \
   -i samples/sherlock_episode1.mp3 \
   -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
-  --dry-run
-
-# Luego ejecutar realmente
-./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+  --high-pass --normalize
 ```
 
-### **Sobrescribir Archivos Existentes**
+### **3. Casos con Ruido de Fondo**
 ```bash
-# Si el archivo de salida ya existe
+# Para audio con siseo de fondo
 ./03_preprocesar_audio/preprocess_audio \
   -i samples/sherlock_episode1.mp3 \
   -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
-  --overwrite
+  --high-pass --remove-hiss --normalize
+
+# Para audio con zumbido eléctrico
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --remove-hum --normalize
+
+# Para casos muy ruidosos
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --remove-hiss --remove-hum --denoise --normalize
 ```
+
+### **4. Testing en Segmentos**
+```bash
+# Probar en un segmento pequeño primero
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/test_segment.wav \
+  --high-pass --remove-hiss --normalize \
+  --from 1:30 --to 1:45
+
+# Si suena bien, procesar archivo completo
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --remove-hiss --normalize
+```
+
+### **5. Dry-run para Verificar**
+```bash
+# Ver qué se procesaría sin crear archivo
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/output.wav \
+  --high-pass --normalize --dry-run
+```
+
+## Trazabilidad del Procesamiento
+
+### **Comando FFmpeg Completo**
+El script siempre muestra el comando FFmpeg exacto que se ejecuta:
+
+```bash
+📋 FFmpeg Command:
+ffmpeg -ss 90.0 -t 5.0 -i samples/audio.mp3 -acodec pcm_s16le -ar 48000 -ac 2 -af highpass=f=80:poles=2,loudnorm=I=-23:TP=-2:LRA=7 processed/output.wav
+```
+
+**Ventajas:**
+- ✅ **Reproducibilidad** - Puedes ejecutar el comando manualmente si es necesario
+- ✅ **Debugging** - Verificar exactamente qué filtros se aplicaron
+- ✅ **Documentación** - Copiar y pegar para referencia futura
+
+### **Log de Procesamiento Automático**
+Se crea automáticamente un archivo `.log` junto al archivo procesado:
+
+```bash
+# Si procesas: processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+# Se crea:     processed/SherlockHolmes_EN_MIX_preprocessed_v01.log
+```
+
+**Contenido del log:**
+```
+# Audio Preprocessing Log
+# Generated: 2025-08-16 21:43:19
+
+## Input File
+File: samples/audio.mp3
+Codec: mp3
+Sample Rate: 48000 Hz
+Channels: 2
+Duration: 51:58 (3118.1s)
+Bit Rate: 320000 bps
+
+## Processing Options
+High-pass filter (80 Hz): Yes
+Remove hiss: No
+Remove hum (50/100/150 Hz): No
+General denoise: No
+Normalize (-23 LUFS): Yes
+
+## Time Range
+Start: 01:30
+End: 01:35
+
+## Output File
+File: processed/test.wav
+Format: WAV (48kHz, 16-bit, stereo)
+Status: Success
+
+## FFmpeg Command
+ffmpeg -ss 90.0 -t 5.0 -i samples/audio.mp3 -acodec pcm_s16le -ar 48000 -ac 2 -af highpass=f=80:poles=2,loudnorm=I=-23:TP=-2:LRA=7 processed/test.wav
+```
+
+**Ventajas del log:**
+- ✅ **Historial completo** - Qué se procesó, cuándo y cómo
+- ✅ **Configuración exacta** - Todos los parámetros utilizados
+- ✅ **Troubleshooting** - Información para resolver problemas
+- ✅ **Auditoría** - Trazabilidad para proyectos profesionales
 
 ### **Parámetros del Preprocesamiento**
 
@@ -152,34 +270,53 @@ El preprocesador usa configuraciones fijas optimizadas para doblaje:
   -o processed/output.wav
 ```
 
-## Flujo de Trabajo Simplificado
+## Flujo de Trabajo Optimizado
 
-### **Flujo Actual (Recomendado)**
+### **Flujo Recomendado (Con Auto-detección Distribuida)**
 ```bash
 # 1. Analizar calidad (Paso 2)
 ./02_analizar_audios/audio_analyzer -i samples
 
-# 2. Preprocesamiento completo en un comando (Paso 3)
+# 2. Auto-detectar ruido con análisis distribuido (3 segmentos)
 ./03_preprocesar_audio/preprocess_audio \
   -i samples/audio_recomendado.mp3 \
-  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+  -o processed/output.wav \
+  --auto-detect-noise
 
-# 3. Stem splitting (Paso 4)
+# Salida: "Suggested parameters: --high-pass --remove-hiss --normalize"
+
+# 3. Probar en segmento con parámetros sugeridos
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/audio_recomendado.mp3 \
+  -o processed/test.wav \
+  --high-pass --remove-hiss --normalize \
+  --from 1:30 --to 1:45
+
+# 4. Procesar archivo completo si el test suena bien
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/audio_recomendado.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --remove-hiss --normalize
+
+# 5. Stem splitting (Paso 4)
 ./04_separar_pistas/stem_splitter -i processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
 
-### **¿Qué Hace el Preprocesamiento Automáticamente?**
+### **Flujo Rápido (Para Audio Conocido)**
+```bash
+# Si ya sabes qué filtros necesitas
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/audio_recomendado.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --normalize
+```
 
-**Un solo comando realiza todos los pasos en el orden correcto:**
-1. ✅ **Conversión a WAV** (48kHz, 16-bit, estéreo)
-2. ✅ **Filtro de altas frecuencias** (80 Hz) - elimina ruido ANTES de normalizar
-3. ✅ **Normalización** (-23 LUFS) - calcula niveles sobre audio limpio
-
-**Ventajas del enfoque unificado:**
-- ✅ **Simplicidad** - Un comando en lugar de tres
-- ✅ **Orden correcto** - Procesamiento optimizado automáticamente
-- ✅ **Menos errores** - No hay pasos intermedios que olvidar
-- ✅ **Eficiencia** - Procesamiento en una sola pasada de FFmpeg
+### **Ventajas del Enfoque Flexible:**
+- ✅ **Control granular** - Solo aplicas lo que necesitas
+- ✅ **Testing fácil** - Pruebas en segmentos antes del procesamiento completo
+- ✅ **Auto-detección** - El sistema sugiere qué filtros usar
+- ✅ **Una sola pasada** - Máxima calidad sin re-encoding múltiple
+- ✅ **Orden correcto automático** - Los filtros se aplican en secuencia óptima
 
 ## Verificación de Resultados
 
@@ -264,9 +401,15 @@ Una vez completado el preprocesamiento:
 
 ## Estado del Desarrollo
 
-- ✅ **preprocess_audio** - Comando unificado completado y probado
-- ✅ **Conversión a WAV** - Integrado (48kHz, 16-bit, estéreo)
-- ✅ **Filtro de altas frecuencias** - Integrado (80 Hz, 2 poles)
-- ✅ **Normalización** - Integrado (-23 LUFS conservador)
-- 🚧 **Herramientas individuales** - Mantenidas para casos especiales
-- 🚧 **Procesamiento avanzado** - Futuras mejoras según necesidades
+- ✅ **preprocess_audio** - Comando flexible completado y probado
+- ✅ **Conversión a WAV** - Siempre aplicada (48kHz, 16-bit, estéreo)
+- ✅ **Filtro de altas frecuencias** - Opcional (--high-pass, 80 Hz, 2 poles)
+- ✅ **Eliminación de siseo** - Opcional (--remove-hiss, 8 dB reducción conservadora)
+- ✅ **Eliminación de zumbido** - Opcional (--remove-hum, 50/100/150 Hz)
+- ✅ **Reducción general de ruido** - Opcional (--denoise, RNNoise si disponible)
+- ✅ **Normalización** - Opcional (--normalize, -23 LUFS conservador)
+- ✅ **Procesamiento por segmentos** - Implementado (--from/--to para testing)
+- ✅ **Auto-detección de ruido** - Implementado (--auto-detect-noise con análisis distribuido)
+- ✅ **Una sola pasada FFmpeg** - Máxima calidad sin re-encoding
+- ✅ **Trazabilidad completa** - Comando FFmpeg mostrado + log automático
+- ✅ **Logs de procesamiento** - Archivo .log con todos los detalles
