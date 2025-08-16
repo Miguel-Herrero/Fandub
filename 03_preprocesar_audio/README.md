@@ -30,19 +30,25 @@ Preparar el audio seleccionado del Paso 2 para el proceso de separación de pist
 ```
 **Función:** Ajusta el volumen a niveles óptimos para stem splitting usando EBU R128 conservador.
 
-### **3. Reducción de Ruido** 🚧 (Próximamente)
+### **3. Eliminación de Ruido de Baja Frecuencia** ✅ (Implementado)
+```bash
+./03_preprocesar_audio/remove_low_frequency_noise/remove_low_frequency_noise -i audio.wav -o filtered.wav
+```
+**Función:** Elimina ruido de baja frecuencia (aire acondicionado, golpes de micro) con filtro 80 Hz.
+
+### **4. Reducción de Ruido Avanzada** 🚧 (Próximamente)
 ```bash
 ./03_preprocesar_audio/remove_noise -i audio.wav -o clean.wav
 ```
-**Función:** Elimina ruido de fondo que puede interferir con la separación.
+**Función:** Elimina ruido de fondo complejo que puede interferir con la separación.
 
-### **4. Realce de Voz** 🚧 (Próximamente)
+### **5. Realce de Voz** 🚧 (Próximamente)
 ```bash
 ./03_preprocesar_audio/enhance_voice -i audio.wav -o enhanced.wav
 ```
 **Función:** Optimiza frecuencias de diálogo para mejor separación.
 
-### **5. Procesamiento por Lotes** 🚧 (Próximamente)
+### **6. Procesamiento por Lotes** 🚧 (Próximamente)
 ```bash
 ./03_preprocesar_audio/batch_preprocess -i audio.wav -o processed.wav
 ```
@@ -159,13 +165,20 @@ SherlockHolmes_ES_MIX_final_v01.wav
 
 ## Configuraciones Recomendadas por Caso
 
-### **Para Doblaje de Series/Películas (Estándar)**
+### **Para Doblaje de Series/Películas (Flujo Completo Recomendado)**
 ```bash
+# Paso 1: Conversión a WAV
 ./convert_to_wav -i audio.mp3 -o audio.wav --sample-rate 48000 --bit-depth 16
+
+# Paso 2: Filtrar ruido de baja frecuencia (PRIMERO)
+./remove_low_frequency_noise/remove_low_frequency_noise -i audio.wav -o filtered.wav
+
+# Paso 3: Normalizar audio limpio
+./normalize_audio/normalize_audio -i filtered.wav -o normalized.wav --no-analyze
 ```
 - **Sample Rate:** 48000 Hz (estándar video)
 - **Bit Depth:** 16 bits (suficiente)
-- **Canales:** Mantener original (usualmente estéreo)
+- **Orden:** Filtrar → Normalizar (crucial para mejores resultados)
 
 ### **Para Contenido con Mucho Ruido**
 ```bash
@@ -184,7 +197,7 @@ SherlockHolmes_ES_MIX_final_v01.wav
 
 ## Flujo de Trabajo Recomendado
 
-### **Flujo Básico (Actual)**
+### **Flujo Básico (Mínimo)**
 ```bash
 # 1. Analizar calidad (Paso 2)
 ./02_analizar_audios/audio_analyzer -i samples
@@ -195,7 +208,7 @@ SherlockHolmes_ES_MIX_final_v01.wav
 # 3. Proceder al stem splitting (Paso 4)
 ```
 
-### **Flujo Actual (Con Normalización)**
+### **Flujo Recomendado (Con Preprocesamiento)**
 ```bash
 # 1. Analizar calidad
 ./02_analizar_audios/audio_analyzer -i samples
@@ -203,12 +216,23 @@ SherlockHolmes_ES_MIX_final_v01.wav
 # 2. Convertir a WAV
 ./03_preprocesar_audio/convert_to_wav -i samples/audio_recomendado.mp3 -o processed/audio.wav
 
-# 3. Normalizar para stem splitting
-./03_preprocesar_audio/normalize_audio/normalize_audio -i processed/audio.wav -o processed/normalized.wav
+# 3. Eliminar ruido de baja frecuencia (PRIMERO - antes de normalizar)
+./03_preprocesar_audio/remove_low_frequency_noise/remove_low_frequency_noise -i processed/audio.wav -o processed/filtered.wav
 
-# 4. Stem splitting
+# 4. Normalizar audio limpio para stem splitting
+./03_preprocesar_audio/normalize_audio/normalize_audio -i processed/filtered.wav -o processed/normalized.wav
+
+# 5. Stem splitting
 ./04_separar_pistas/stem_splitter -i processed/normalized.wav
 ```
+
+### **¿Por Qué Este Orden?**
+
+**Filtrar ANTES de normalizar es crucial:**
+- ✅ **Niveles más precisos** - La normalización se calcula sobre contenido limpio
+- ✅ **Evita amplificar ruido** - El ruido de baja frecuencia no se potencia
+- ✅ **Mejor stem splitting** - Audio optimizado desde el primer paso
+- ✅ **Procesamiento eficiente** - Cada paso trabaja con datos más limpios
 
 ### **Flujo Completo (Futuro)**
 ```bash
@@ -294,6 +318,7 @@ Una vez convertido a WAV:
 
 - ✅ **convert_to_wav** - Completado y probado
 - ✅ **normalize_audio** - Completado y probado
+- ✅ **remove_low_frequency_noise** - Completado y probado
 - 🚧 **remove_noise** - En desarrollo
 - 🚧 **enhance_voice** - En desarrollo
 - 🚧 **batch_preprocess** - En desarrollo
