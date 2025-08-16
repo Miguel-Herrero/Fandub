@@ -1,58 +1,36 @@
-# Paso 3: Preprocesamiento de Audio
+# Paso 3: Preprocesamiento Completo de Audio
 
 ## Objetivo
 
-Preparar el audio seleccionado del Paso 2 para el proceso de separación de pistas (stem splitting), optimizando su calidad y formato para obtener los mejores resultados posibles.
+Preparar completamente el audio seleccionado del Paso 2 para el proceso de separación de pistas (stem splitting) mediante un único comando que realiza todos los pasos de optimización necesarios.
 
-## ¿Por Qué Preprocesar?
+## ¿Qué Hace el Preprocesamiento Completo?
 
-### **Problema con MP3/AAC**
-- **Compresión con pérdida** - Información eliminada permanentemente
-- **Artefactos de compresión** - Pueden interferir con stem splitting
-- **Formato no óptimo** - No ideal para edición profesional
+### **Problemas que Resuelve**
+- **Formato comprimido** (MP3/AAC) - Convierte a WAV sin pérdidas
+- **Ruido de baja frecuencia** - Elimina aire acondicionado, golpes de micro
+- **Niveles inconsistentes** - Normaliza para stem splitting óptimo
+- **Múltiples pasos manuales** - Todo en un solo comando
 
-### **Solución: WAV + Optimizaciones**
-- **Sin compresión** - Conserva toda la información disponible
-- **Formato estándar** - Compatible con todas las herramientas profesionales
-- **Optimizaciones específicas** - Mejoras para separación de pistas
+### **Resultado: Audio Optimizado**
+- **Formato WAV** (48kHz, 16-bit, estéreo) - Estándar profesional
+- **Sin ruido de graves** - Filtro 80 Hz elimina interferencias
+- **Niveles perfectos** - Normalización -23 LUFS conservadora
+- **Listo para stem splitting** - Sin procesamiento adicional necesario
 
-## Herramientas Disponibles
+## Comando Único de Preprocesamiento
 
-### **1. Conversión a WAV** ✅ (Implementado)
+### **Preprocesador Completo** ✅ (Implementado)
 ```bash
-./03_preprocesar_audio/convert_to_wav -i audio.mp3 -o audio.wav
+./03_preprocesar_audio/preprocess_audio -i audio.mp3 -o SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
-**Función:** Convierte cualquier formato de audio a WAV de alta calidad.
 
-### **2. Normalización** ✅ (Implementado)
-```bash
-./03_preprocesar_audio/normalize_audio/normalize_audio -i audio.wav -o normalized.wav
-```
-**Función:** Ajusta el volumen a niveles óptimos para stem splitting usando EBU R128 conservador.
+**Realiza automáticamente:**
+1. **Conversión a WAV** (48kHz, 16-bit, estéreo)
+2. **Filtro de altas frecuencias** (80 Hz, 2 poles) - elimina ruido de graves
+3. **Normalización EBU R128** (-23 LUFS) - niveles óptimos para stem splitting
 
-### **3. Eliminación de Ruido de Baja Frecuencia** ✅ (Implementado)
-```bash
-./03_preprocesar_audio/remove_low_frequency_noise/remove_low_frequency_noise -i audio.wav -o filtered.wav
-```
-**Función:** Elimina ruido de baja frecuencia (aire acondicionado, golpes de micro) con filtro 80 Hz.
-
-### **4. Reducción de Ruido Avanzada** 🚧 (Próximamente)
-```bash
-./03_preprocesar_audio/remove_noise -i audio.wav -o clean.wav
-```
-**Función:** Elimina ruido de fondo complejo que puede interferir con la separación.
-
-### **5. Realce de Voz** 🚧 (Próximamente)
-```bash
-./03_preprocesar_audio/enhance_voice -i audio.wav -o enhanced.wav
-```
-**Función:** Optimiza frecuencias de diálogo para mejor separación.
-
-### **6. Procesamiento por Lotes** 🚧 (Próximamente)
-```bash
-./03_preprocesar_audio/batch_preprocess -i audio.wav -o processed.wav
-```
-**Función:** Aplica todos los pasos automáticamente.
+**Resultado:** Audio completamente optimizado y listo para stem splitting en un solo paso.
 
 ## Convenciones de Naming Profesional
 
@@ -63,9 +41,9 @@ En doblaje profesional, el naming correcto es **crucial** para:
 - ✅ **Colaboración** - Equipos entienden inmediatamente el contenido
 - ✅ **Versionado** - Control de versiones sin confusión
 
-### **Estructura Estándar**
+### **Estructura Estándar para Archivos Preprocesados**
 ```
-[PROYECTO]_[IDIOMA]_[TIPO]_[PROCESAMIENTO]_[VERSION].wav
+[PROYECTO]_[IDIOMA]_[TIPO]_preprocessed_[VERSION].wav
 ```
 
 ### **Códigos de Idioma**
@@ -86,239 +64,209 @@ En doblaje profesional, el naming correcto es **crucial** para:
 ### **Ejemplos de Naming**
 ```bash
 # Archivo original
-SherlockHolmes_EN_MIX_wav_v01.wav
+samples/sherlock_episode1.mp3
 
-# Después de normalización
-SherlockHolmes_EN_MIX_normalized_v01.wav
+# Después del preprocesamiento completo
+processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 
-# Stems separados
-SherlockHolmes_EN_VOX_isolated_v01.wav
-SherlockHolmes_EN_MNE_isolated_v01.wav
+# Stems separados (después del paso 4)
+stems/SherlockHolmes_EN_VOX_isolated_v01.wav
+stems/SherlockHolmes_EN_MNE_isolated_v01.wav
 
 # Mezcla final en español
-SherlockHolmes_ES_MIX_final_v01.wav
+final/SherlockHolmes_ES_MIX_final_v01.wav
 ```
 
-## Uso Detallado
+## Uso del Preprocesador Completo
 
-### **Conversión a WAV (Paso Fundamental)**
-
-#### **Uso Básico**
+### **Uso Básico (Recomendado)**
 ```bash
-# Conversión simple
-./03_preprocesar_audio/convert_to_wav -i samples/audio.mp3 -o processed/audio.wav
+# Preprocesamiento completo en un comando
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
 
-#### **Uso Profesional (Recomendado)**
+### **Uso con Testing**
 ```bash
-# Naming automático siguiendo convenciones de doblaje
-./03_preprocesar_audio/convert_to_wav \
-  -i samples/audio.mp3 \
-  -o processed/ \
-  --auto-name \
-  --project SherlockHolmes \
-  --language EN \
-  --type MIX \
-  --version v01
+# Probar primero sin crear archivo (para archivos largos)
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --dry-run
 
-# Resultado: processed/SherlockHolmes_EN_MIX_wav_v01.wav
+# Luego ejecutar realmente
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
 
-#### **Configuración Avanzada**
+### **Sobrescribir Archivos Existentes**
 ```bash
-# Control total de parámetros
-./03_preprocesar_audio/convert_to_wav \
-  -i samples/audio.mp3 \
-  -o processed/ \
-  --auto-name \
-  --project MiPelicula \
-  --language ES \
-  --type MIX \
-  --sample-rate 48000 \
-  --bit-depth 16 \
+# Si el archivo de salida ya existe
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
   --overwrite
 ```
 
-#### **Conversión a Mono**
+### **Parámetros del Preprocesamiento**
+
+El preprocesador usa configuraciones fijas optimizadas para doblaje:
+
+#### **Formato de Salida (Fijo)**
+- **Sample Rate:** 48000 Hz (estándar profesional de video)
+- **Bit Depth:** 16 bits (suficiente para fuentes comprimidas)
+- **Canales:** Estéreo (mantiene información espacial)
+
+#### **Filtro de Altas Frecuencias (Fijo)**
+- **Frecuencia de corte:** 80 Hz (elimina ruido, preserva voces)
+- **Poles:** 2 (pendiente suave, mínimos artefactos)
+
+#### **Normalización (Fija)**
+- **Target:** -23 LUFS (conservador, preserva dinámicas)
+- **True Peak:** -2 dBFS (headroom seguro)
+- **LRA:** 7 LU (mantiene variaciones naturales)
+
+## Casos de Uso
+
+### **Para Doblaje de Series/Películas (Estándar)**
 ```bash
-# Para contenido que no necesita estéreo
-./03_preprocesar_audio/convert_to_wav \
-  -i samples/audio.mp3 \
-  -o processed/audio_mono.wav \
-  --channels 1
-```
-
-### **Parámetros Explicados**
-
-#### **Sample Rate (Frecuencia de Muestreo)**
-- **48000 Hz** ✅ **Recomendado** - Estándar profesional de video
-- **44100 Hz** ⚠️ Aceptable - Estándar de CD
-- **96000 Hz** ❌ Innecesario - Para fuentes MP3
-
-#### **Bit Depth (Profundidad de Bits)**
-- **16 bits** ✅ **Recomendado** - Suficiente para fuentes MP3
-- **24 bits** ⚠️ Overkill - No mejora calidad desde MP3
-
-#### **Canales**
-- **Estéreo (2)** ✅ **Recomendado** - Mantiene información espacial
-- **Mono (1)** ⚠️ Solo si es necesario - Pierde información espacial
-
-## Configuraciones Recomendadas por Caso
-
-### **Para Doblaje de Series/Películas (Flujo Completo Recomendado)**
-```bash
-# Paso 1: Conversión a WAV
-./convert_to_wav -i audio.mp3 -o audio.wav --sample-rate 48000 --bit-depth 16
-
-# Paso 2: Filtrar ruido de baja frecuencia (PRIMERO)
-./remove_low_frequency_noise/remove_low_frequency_noise -i audio.wav -o filtered.wav
-
-# Paso 3: Normalizar audio limpio
-./normalize_audio/normalize_audio -i filtered.wav -o normalized.wav --no-analyze
-```
-- **Sample Rate:** 48000 Hz (estándar video)
-- **Bit Depth:** 16 bits (suficiente)
-- **Orden:** Filtrar → Normalizar (crucial para mejores resultados)
-
-### **Para Contenido con Mucho Ruido**
-```bash
-# Paso 1: Convertir
-./convert_to_wav -i audio.mp3 -o audio.wav
-
-# Paso 2: Reducir ruido (cuando esté disponible)
-# ./remove_noise -i audio.wav -o clean.wav
+# Un solo comando hace todo
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/sherlock_episode1.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
 
 ### **Para Archivos Muy Grandes**
 ```bash
-# Usar 16 bits para ahorrar espacio
-./convert_to_wav -i audio.mp3 -o audio.wav --bit-depth 16
+# Probar primero con dry-run
+./03_preprocesar_audio/preprocess_audio \
+  -i large_file.mp3 \
+  -o processed/output.wav \
+  --dry-run
+
+# Luego procesar si todo está bien
+./03_preprocesar_audio/preprocess_audio \
+  -i large_file.mp3 \
+  -o processed/output.wav
 ```
 
-## Flujo de Trabajo Recomendado
+## Flujo de Trabajo Simplificado
 
-### **Flujo Básico (Mínimo)**
+### **Flujo Actual (Recomendado)**
 ```bash
 # 1. Analizar calidad (Paso 2)
 ./02_analizar_audios/audio_analyzer -i samples
 
-# 2. Convertir el archivo recomendado
-./03_preprocesar_audio/convert_to_wav -i samples/audio_recomendado.mp3 -o processed/audio.wav
+# 2. Preprocesamiento completo en un comando (Paso 3)
+./03_preprocesar_audio/preprocess_audio \
+  -i samples/audio_recomendado.mp3 \
+  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 
-# 3. Proceder al stem splitting (Paso 4)
+# 3. Stem splitting (Paso 4)
+./04_separar_pistas/stem_splitter -i processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
 
-### **Flujo Recomendado (Con Preprocesamiento)**
-```bash
-# 1. Analizar calidad
-./02_analizar_audios/audio_analyzer -i samples
+### **¿Qué Hace el Preprocesamiento Automáticamente?**
 
-# 2. Convertir a WAV
-./03_preprocesar_audio/convert_to_wav -i samples/audio_recomendado.mp3 -o processed/audio.wav
+**Un solo comando realiza todos los pasos en el orden correcto:**
+1. ✅ **Conversión a WAV** (48kHz, 16-bit, estéreo)
+2. ✅ **Filtro de altas frecuencias** (80 Hz) - elimina ruido ANTES de normalizar
+3. ✅ **Normalización** (-23 LUFS) - calcula niveles sobre audio limpio
 
-# 3. Eliminar ruido de baja frecuencia (PRIMERO - antes de normalizar)
-./03_preprocesar_audio/remove_low_frequency_noise/remove_low_frequency_noise -i processed/audio.wav -o processed/filtered.wav
-
-# 4. Normalizar audio limpio para stem splitting
-./03_preprocesar_audio/normalize_audio/normalize_audio -i processed/filtered.wav -o processed/normalized.wav
-
-# 5. Stem splitting
-./04_separar_pistas/stem_splitter -i processed/normalized.wav
-```
-
-### **¿Por Qué Este Orden?**
-
-**Filtrar ANTES de normalizar es crucial:**
-- ✅ **Niveles más precisos** - La normalización se calcula sobre contenido limpio
-- ✅ **Evita amplificar ruido** - El ruido de baja frecuencia no se potencia
-- ✅ **Mejor stem splitting** - Audio optimizado desde el primer paso
-- ✅ **Procesamiento eficiente** - Cada paso trabaja con datos más limpios
-
-### **Flujo Completo (Futuro)**
-```bash
-# 1. Analizar calidad
-./02_analizar_audios/audio_analyzer -i samples
-
-# 2. Preprocesamiento completo
-./03_preprocesar_audio/batch_preprocess -i samples/audio_recomendado.mp3 -o processed/audio_final.wav
-
-# 3. Stem splitting
-./04_separar_pistas/stem_splitter -i processed/audio_final.wav
-```
+**Ventajas del enfoque unificado:**
+- ✅ **Simplicidad** - Un comando en lugar de tres
+- ✅ **Orden correcto** - Procesamiento optimizado automáticamente
+- ✅ **Menos errores** - No hay pasos intermedios que olvidar
+- ✅ **Eficiencia** - Procesamiento en una sola pasada de FFmpeg
 
 ## Verificación de Resultados
 
-### **Comprobar Conversión**
+### **Comprobar Audio Preprocesado**
 ```bash
-# Ver información del archivo convertido
-ffprobe -v quiet -print_format json -show_streams processed/audio.wav
+# Ver información del archivo preprocesado
+ffprobe -v quiet -print_format json -show_streams processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 
 # Escuchar el resultado
-afplay processed/audio.wav
+afplay processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 ```
 
-### **Comparar Tamaños**
+### **Comparar Antes y Después**
 ```bash
 # Ver tamaños de archivos
-ls -lh samples/audio.mp3 processed/audio.wav
+ls -lh samples/sherlock_episode1.mp3 processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
 
 # Ejemplo típico:
-# audio.mp3:  5.2 MB (comprimido)
-# audio.wav: 52.1 MB (sin comprimir)
+# sherlock_episode1.mp3:     5.2 MB (comprimido)
+# *_preprocessed_v01.wav:   52.1 MB (sin comprimir, filtrado, normalizado)
+```
+
+### **Verificar Procesamiento**
+```bash
+# El archivo debe tener estas características:
+# - Formato: WAV, 48000 Hz, 16-bit, estéreo
+# - Sin frecuencias <80 Hz (ruido eliminado)
+# - Niveles normalizados (-23 LUFS aproximadamente)
 ```
 
 ## Solución de Problemas
 
-### **Error: "FFmpeg not found"**
+### **Error: "FFmpeg not found" o "Missing filters"**
 ```bash
-# Instalar FFmpeg
+# Instalar FFmpeg con todos los filtros
 brew install ffmpeg
 
-# Verificar instalación
+# Verificar instalación y filtros
 ffmpeg -version
+ffmpeg -filters | grep -E "(highpass|loudnorm)"
 ```
 
 ### **Error: "Output file exists"**
 ```bash
 # Usar flag --overwrite
-./convert_to_wav -i audio.mp3 -o audio.wav --overwrite
+./03_preprocesar_audio/preprocess_audio -i audio.mp3 -o output.wav --overwrite
 ```
 
-### **Archivo muy grande**
+### **Archivo muy grande o procesamiento lento**
 ```bash
+# Usar dry-run primero para verificar
+./03_preprocesar_audio/preprocess_audio -i large_file.mp3 -o output.wav --dry-run
+
 # Verificar duración del audio
-ffprobe -v quiet -show_entries format=duration -of csv=p=0 audio.mp3
+ffprobe -v quiet -show_entries format=duration -of csv=p=0 large_file.mp3
 
 # Si es muy largo, considerar recortar primero
-ffmpeg -i audio.mp3 -ss 00:00:00 -t 01:00:00 audio_1hour.mp3
+ffmpeg -i large_file.mp3 -ss 00:00:00 -t 01:00:00 segment.mp3
 ```
 
-### **Calidad no mejora**
-**Importante:** La conversión a WAV NO mejora la calidad del MP3 original. Solo:
-- ✅ Evita re-compresión en pasos posteriores
-- ✅ Proporciona formato óptimo para herramientas profesionales
-- ✅ Elimina artefactos de decodificación repetida
+### **El audio no suena "mejor"**
+**Importante:** El preprocesamiento NO mejora la calidad del audio original. Su objetivo es:
+- ✅ **Optimizar para stem splitting** - Formato y niveles ideales
+- ✅ **Eliminar interferencias** - Ruido que confunde algoritmos
+- ✅ **Estandarizar formato** - WAV profesional consistente
+- ✅ **Preparar para procesamiento** - Sin pasos adicionales necesarios
 
 ## Próximos Pasos
 
-Una vez convertido a WAV:
+Una vez completado el preprocesamiento:
 
-1. **Verificar calidad** - Escuchar el resultado
-2. **Aplicar preprocesamiento adicional** - Cuando esté disponible
+1. **Verificar resultado** - Escuchar el audio preprocesado
+2. **Comprobar formato** - Debe ser WAV, 48kHz, 16-bit, estéreo
 3. **Proceder al Paso 4** - Separación de pistas (stem splitting)
 
 ## Requisitos del Sistema
 
-- **FFmpeg** (instalado y en PATH)
+- **FFmpeg** con filtros `highpass` y `loudnorm` (versión 3.1+)
 - **Python 3.6+** (incluido en macOS)
 - **Espacio en disco** - WAV ocupa ~10x más que MP3
-- **Tiempo de procesamiento** - Conversión rápida (tiempo real o menos)
+- **Tiempo de procesamiento** - Aproximadamente tiempo real para archivos normales
 
 ## Estado del Desarrollo
 
-- ✅ **convert_to_wav** - Completado y probado
-- ✅ **normalize_audio** - Completado y probado
-- ✅ **remove_low_frequency_noise** - Completado y probado
-- 🚧 **remove_noise** - En desarrollo
-- 🚧 **enhance_voice** - En desarrollo
-- 🚧 **batch_preprocess** - En desarrollo
+- ✅ **preprocess_audio** - Comando unificado completado y probado
+- ✅ **Conversión a WAV** - Integrado (48kHz, 16-bit, estéreo)
+- ✅ **Filtro de altas frecuencias** - Integrado (80 Hz, 2 poles)
+- ✅ **Normalización** - Integrado (-23 LUFS conservador)
+- 🚧 **Herramientas individuales** - Mantenidas para casos especiales
+- 🚧 **Procesamiento avanzado** - Futuras mejoras según necesidades

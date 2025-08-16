@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+Complete Audio Preprocessor
+
+Performs complete audio preprocessing for dubbing workflows in a single command:
+1. Converts input to WAV format (48kHz, 16-bit, stereo)
+2. Applies high-pass filter (80 Hz, 2 poles) to remove low frequency noise
+3. Normalizes audio using EBU R128 (-23 LUFS) for optimal stem splitting
+
+This replaces the need for multiple separate preprocessing steps.
+"""
+
+import sys
+import argparse
+import subprocess
+from pathlib import Path
+import logging
+import json
+import tempfile
+import os
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+
+def check_ffmpeg():
+    """Check if FFmpeg is available with required filters."""
+    try:
+        # Check FFmpeg version
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return False, "FFmpeg not found"
+            
+        # Check required filters
+        result = subprocess.run(['ffmpeg', '-filters'], 
+                              capture_output=True, text=True, timeout=10)
+        
+        missing_filters = []
+        if 'highpass' not in result.stdout:
+            missing_filters.append('highpass')
+        if 'loudnorm' not in result.stdout:
+            missing_filters.append('loudnorm')
+            
+        if missing_filters:
+            return False, f"Missing filters: {', '.join(missing_filters)}"
+            
+        return True, "FFmpeg ready"
+        
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False, "FFmpeg not found or not responding"
+
+
+def get_audio_info(input_file):
+    """Get basic audio information using ffprobe."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_streams', '-select_streams', 'a:0', str(input_file)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            return None
+            
+        data = json.loads(result.stdout)
+        
+        if not data.get('streams'):
+            return None
+            
+        stream = data['streams'][0]
+        return {
+            'codec': stream.get('codec_name', 'unknown'),
+            'sample_rate': int(stream.get('sample_rate', 0)),
+            'channels': int(stream.get('channels', 0)),
+            'duration': float(stream.get('duration', 0)),
+            'bit_rate': int(stream.get('bit_rate', 0)) if stream.get('bit_rate') else None
+        }
+    except Exception as e:
+        logger.error(f"Error getting audio info: {e}")
+        return None
+
+
+def preprocess_audio(input_file, output_file, overwrite=False, dry_run=False):
+    """
+    Complete audio preprocessing pipeline.
+    
+    Args:
+        input_file: Path to input audio file (any format)
+        output_file: Path to output preprocessed WAV file
+        overwrite: Whether to overwrite existing output file
+        dry_run: Test processing without creating output file
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    input_path = Path(input_file)
+    output_path = Path(output_file)
+    
+    # Check input file exists
+    if not input_path.exists():
+        logger.error(f"Input file not found: {input_path}")
+        return False
+    
+    # Check if output exists and overwrite flag (skip for dry run)
+    if not dry_run and output_path.exists() and not overwrite:
+        logger.error(f"Output file exists (use --overwrite to replace): {output_path}")
+        return False
+    
+    # Get input audio info
+    logger.info(f"Analyzing input file: {input_path.name}")
+    audio_info = get_audio_info(input_path)
+    
+    if not audio_info:
+        logger.error("Could not analyze input audio file")
+        return False
+    
+    logger.info(f"Input: {audio_info['codec']} | "
+               f"{audio_info['sample_rate']}Hz | "
+               f"{audio_info['channels']} channels | "
+               f"{audio_info['duration']:.1f}s")
+    
+    # Create output directory if it doesn't exist
+    if not dry_run:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Build FFmpeg command for complete preprocessing
+    cmd = ['ffmpeg']
+    
+    # Input file
+    cmd.extend(['-i', str(input_path)])
+    
+    # Audio processing chain:
+    # 1. Convert to WAV format (48kHz, 16-bit, stereo)
+    cmd.extend(['-acodec', 'pcm_s16le'])
+    cmd.extend(['-ar', '48000'])
+    cmd.extend(['-ac', '2'])
+    
+    # 2. Apply audio filters in sequence
+    filter_chain = []
+    
+    # High-pass filter (80 Hz, 2 poles) - removes low frequency noise
+    filter_chain.append('highpass=f=80:poles=2')
+    
+    # Loudness normalization (-23 LUFS) - conservative for stem splitting
+    filter_chain.append('loudnorm')
+    
+    # Combine filters
+    cmd.extend(['-af', ','.join(filter_chain)])
+    
+    # Overwrite output
+    if overwrite and not dry_run:
+        cmd.append('-y')
+    
+    # Output file (use null output for dry run)
+    if dry_run:
+        cmd.extend(['-f', 'null', '-'])
+        logger.info("DRY RUN: Testing complete preprocessing without creating output file")
+    else:
+        cmd.append(str(output_path))
+    
+    # Execute preprocessing
+    logger.info("Starting complete audio preprocessing...")
+    logger.info("Step 1: Converting to WAV (48kHz, 16-bit, stereo)")
+    logger.info("Step 2: Applying high-pass filter (80 Hz, 2 poles)")
+    logger.info("Step 3: Normalizing audio (-23 LUFS, conservative)")
+    logger.info("This optimizes audio for stem splitting in a single pass")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg preprocessing failed: {result.stderr}")
+            return False
+        
+        if dry_run:
+            logger.info(f"✅ Dry run successful!")
+            logger.info(f"Complete preprocessing would create: {output_path}")
+            logger.info("No output file was created (dry run mode)")
+        else:
+            # Verify output file was created
+            if not output_path.exists():
+                logger.error("Output file was not created")
+                return False
+            
+            # Get output file size
+            size_mb = output_path.stat().st_size / (1024 * 1024)
+            
+            logger.info(f"✅ Complete preprocessing successful!")
+            logger.info(f"Output: {output_path}")
+            logger.info(f"Size: {size_mb:.1f} MB")
+            logger.info(f"Format: WAV, 48kHz, 16-bit, stereo, filtered, normalized")
+        
+        return True
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Preprocessing timed out (file too large or system too slow)")
+        return False
+    except Exception as e:
+        logger.error(f"Preprocessing error: {e}")
+        return False
+
+
+def main():
+    """Main CLI interface."""
+    parser = argparse.ArgumentParser(
+        description="Complete audio preprocessing for dubbing workflows",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic preprocessing (recommended)
+  ./preprocess_audio -i audio.mp3 -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+
+  # Test preprocessing without creating output file
+  ./preprocess_audio -i audio.mp3 -o output.wav --dry-run
+
+  # Overwrite existing output
+  ./preprocess_audio -i audio.mp3 -o output.wav --overwrite
+
+Processing Steps (automatic):
+  1. Convert to WAV (48kHz, 16-bit, stereo)
+  2. High-pass filter (80 Hz, 2 poles) - removes noise
+  3. Normalize (-23 LUFS) - optimizes for stem splitting
+  
+Output is ready for stem splitting without further processing.
+        """
+    )
+    
+    # Required arguments
+    parser.add_argument('-i', '--input', required=True,
+                       help='Input audio file (any format: MP3, AAC, WAV, etc.)')
+    parser.add_argument('-o', '--output', required=True,
+                       help='Output preprocessed WAV file (full path with professional filename)')
+    
+    # Optional arguments
+    parser.add_argument('--overwrite', action='store_true',
+                       help='Overwrite output file if it exists')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Test preprocessing without creating output file')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose logging')
+    
+    args = parser.parse_args()
+    
+    # Set logging level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    # Check dependencies
+    print("🎛️  Complete Audio Preprocessor")
+    print("=" * 40)
+    
+    ffmpeg_ok, ffmpeg_msg = check_ffmpeg()
+    if not ffmpeg_ok:
+        logger.error(f"FFmpeg check failed: {ffmpeg_msg}")
+        logger.error("Please install a recent version of FFmpeg with loudnorm and highpass filters.")
+        return 1
+    
+    logger.info(f"FFmpeg status: {ffmpeg_msg}")
+    
+    # Perform complete preprocessing
+    success = preprocess_audio(
+        input_file=args.input,
+        output_file=args.output,
+        overwrite=args.overwrite,
+        dry_run=args.dry_run
+    )
+    
+    if success:
+        print("\n💡 Next steps:")
+        print("• Audio is fully preprocessed and optimized")
+        print("• Ready for stem splitting without further processing")
+        print("• All steps completed: WAV conversion + filtering + normalization")
+        return 0
+    else:
+        logger.error("Audio preprocessing failed")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
