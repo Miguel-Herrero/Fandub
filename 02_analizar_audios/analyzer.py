@@ -99,17 +99,22 @@ class AudioAnalyzer:
             utils.extract_audio_stats(file_path, astats_file)
             astats_metrics = metrics.parse_astats_file(astats_file)
             
-            # Step 4: Create A/B test fragment
+            # Step 4: Generate spectrum visualization
+            logger.debug(f"Generating spectrum image for {file_path.name}")
+            spectrum_file = file_output_dir / f"{clean_name}_spectrum.png"
+            spectrum_success = utils.generate_spectrum_image(file_path, spectrum_file)
+
+            # Step 5: Create A/B test fragment
             logger.debug(f"Creating A/B fragment for {file_path.name}")
             ab_dir = self.output_dir / OUTPUT_FILES['ab_fragments']
             ensure_directory(ab_dir)
             ab_file = ab_dir / f"{clean_name}.wav"
             utils.create_ab_fragment(file_path, ab_file, self.fragment_start, self.fragment_duration)
             
-            # Step 5: Interpret all metrics
+            # Step 6: Interpret all metrics
             logger.debug(f"Interpreting metrics for {file_path.name}")
             interpreted = metrics.interpret_all_metrics()
-            
+
             # Compile results
             result = {
                 'file_path': str(file_path),
@@ -117,6 +122,7 @@ class AudioAnalyzer:
                 'clean_name': clean_name,
                 'output_dir': str(file_output_dir),
                 'ab_fragment': str(ab_file),
+                'spectrum_image': str(spectrum_file) if spectrum_success else None,
                 'analysis_timestamp': datetime.now().isoformat(),
                 'metrics': metrics.get_summary(),
                 'success': True,

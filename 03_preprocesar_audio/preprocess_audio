@@ -111,6 +111,31 @@ def get_audio_info(input_file):
         return None
 
 
+def generate_spectrum_image(input_file, output_file):
+    """Generate a spectrum visualization image from an audio file."""
+    try:
+        cmd = ['ffmpeg']
+        cmd.extend(['-i', str(input_file)])
+        cmd.extend(['-lavfi', 'showspectrumpic=s=1920x1080:legend=1:orientation=vertical'])
+        cmd.extend(['-y', str(output_file)])  # Overwrite output file
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+        if result.returncode != 0:
+            logger.warning(f"Could not generate spectrum image: {result.stderr}")
+            return False
+
+        if not Path(output_file).exists():
+            logger.warning(f"Spectrum image was not created: {output_file}")
+            return False
+
+        return True
+
+    except Exception as e:
+        logger.warning(f"Error generating spectrum image: {e}")
+        return False
+
+
 def auto_detect_noise(input_file, audio_info):
     """
     Analyze audio to detect noise types and suggest filters.
@@ -472,6 +497,18 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
                 logger.info(f"Size: {size_mb:.1f} MB")
                 logger.info(f"Format: WAV, 48kHz, 16-bit, stereo")
                 success = True
+
+        # Generate spectrum image (only for successful non-dry-run processing)
+        if success and not dry_run:
+            # Generate spectrum image with same name as output file
+            spectrum_file = output_path.with_suffix('.png')
+            logger.info("Generating spectrum visualization...")
+
+            spectrum_success = generate_spectrum_image(output_file, spectrum_file)
+            if spectrum_success:
+                logger.info(f"📊 Spectrum image saved: {spectrum_file}")
+            else:
+                logger.warning("Could not generate spectrum image")
 
         # Create processing log (only for successful non-dry-run processing)
         if success and not dry_run:

@@ -40,8 +40,9 @@ Preparar completamente el audio seleccionado del Paso 2 para el proceso de separ
 **Trazabilidad:**
 - **Comando FFmpeg completo** - Se muestra en pantalla para referencia
 - **Log de procesamiento** - Se guarda automáticamente como `archivo.log`
+- **Visualización del espectro** - Se genera automáticamente como `archivo.png`
 
-**Resultado:** Control total sobre el procesamiento en una sola pasada de FFmpeg para máxima calidad con trazabilidad completa.
+**Resultado:** Control total sobre el procesamiento en una sola pasada de FFmpeg para máxima calidad con trazabilidad completa y visualización.
 
 ## Convenciones de Naming Profesional
 
@@ -228,6 +229,37 @@ ffmpeg -ss 90.0 -t 5.0 -i samples/audio.mp3 -acodec pcm_s16le -ar 48000 -ac 2 -a
 - ✅ **Troubleshooting** - Información para resolver problemas
 - ✅ **Auditoría** - Trazabilidad para proyectos profesionales
 
+### **Visualización del Espectro Automática**
+Se crea automáticamente una imagen del espectro junto al archivo procesado:
+
+```bash
+# Si procesas: processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav
+# Se crea:     processed/SherlockHolmes_EN_MIX_preprocessed_v01.png
+```
+
+**Características de la imagen:**
+- **Formato**: PNG de alta resolución (1920x1080)
+- **Contenido**: Espectrograma del audio procesado
+- **Orientación**: Vertical con leyenda incluida
+- **Utilidad**: Verificar visualmente el efecto del procesamiento
+
+**Beneficios de la visualización:**
+- ✅ **Verificación del filtrado** - Ver que se eliminaron las frecuencias bajas
+- ✅ **Detección de artefactos** - Identificar problemas introducidos
+- ✅ **Comparación antes/después** - Evaluar efectividad del procesamiento
+- ✅ **Control de calidad** - Confirmar que el procesamiento funcionó correctamente
+
+**Ejemplo de uso:**
+```bash
+# Procesar audio
+./preprocess_audio -i audio.mp3 -o processed/output.wav --high-pass --remove-hiss --normalize
+
+# Archivos generados:
+# - processed/output.wav (audio procesado)
+# - processed/output.log (log detallado)
+# - processed/output.png (visualización del espectro)
+```
+
 ### **Parámetros del Preprocesamiento**
 
 El preprocesador usa configuraciones fijas optimizadas para doblaje:
@@ -413,3 +445,4 @@ Una vez completado el preprocesamiento:
 - ✅ **Una sola pasada FFmpeg** - Máxima calidad sin re-encoding
 - ✅ **Trazabilidad completa** - Comando FFmpeg mostrado + log automático
 - ✅ **Logs de procesamiento** - Archivo .log con todos los detalles
+- ✅ **Visualización del espectro** - Imagen PNG automática del audio procesado

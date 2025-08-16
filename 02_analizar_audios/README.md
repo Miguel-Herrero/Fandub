@@ -99,13 +99,30 @@ _analysis/
 │   ├── tech.txt            # Información técnica
 │   ├── ffprobe.json        # Datos completos de ffprobe
 │   ├── ebu128.txt          # Mediciones EBU R128
-│   └── astats.txt          # Estadísticas de audio
+│   ├── astats.txt          # Estadísticas de audio
+│   └── archivo1_spectrum.png  # Visualización del espectro (NUEVO)
 └── archivo2/
     ├── tech.txt
     ├── ffprobe.json
     ├── ebu128.txt
-    └── astats.txt
+    ├── astats.txt
+    └── archivo2_spectrum.png  # Visualización del espectro (NUEVO)
 ```
+
+### **Nueva Funcionalidad: Visualización del Espectro**
+
+Se genera automáticamente una imagen del espectro de frecuencias para cada archivo:
+
+- **Formato**: PNG de alta resolución (1920x1080)
+- **Contenido**: Espectrograma completo del archivo de audio
+- **Utilidad**: Visualizar ruido, frecuencias dominantes, calidad general
+- **Ubicación**: Carpeta individual de cada archivo (`archivo_spectrum.png`)
+
+**Beneficios:**
+- ✅ **Detección visual de ruido** - Ver patrones de interferencia
+- ✅ **Comparación de calidad** - Diferencias entre archivos
+- ✅ **Identificación de problemas** - Clipping, distorsión, ruido de fondo
+- ✅ **Verificación de contenido** - Rango de frecuencias utilizado
 
 ### Reporte Principal
 
@@ -115,6 +132,7 @@ El `quality_report.md` incluye:
 2. **Tabla Comparativa** - Métricas con emojis interpretativos
 3. **Análisis Detallado** - Especificaciones y problemas por archivo
 4. **Fragmentos A/B** - Comandos para escucha comparativa
+5. **Imágenes de espectro** - Referencias a las visualizaciones generadas
 
 ## Interpretación de Métricas
 

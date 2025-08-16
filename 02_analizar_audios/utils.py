@@ -405,3 +405,57 @@ def safe_int(value: Any, default: int = 0) -> int:
         return int(float(value))
     except (ValueError, TypeError):
         return default
+
+
+def generate_spectrum_image(input_file: Path, output_file: Path) -> bool:
+    """
+    Generate a spectrum visualization image from an audio file.
+
+    Args:
+        input_file: Path to the input audio file
+        output_file: Path where the spectrum image will be saved
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        cmd = ['ffmpeg']
+
+        if FFMPEG_HIDE_BANNER:
+            cmd.append('-hide_banner')
+        if FFMPEG_NOSTATS:
+            cmd.append('-nostats')
+
+        cmd.extend([
+            '-i', str(input_file),
+            '-lavfi', 'showspectrumpic=s=1920x1080:legend=1:orientation=vertical',
+            '-y',  # Overwrite output file
+            str(output_file)
+        ])
+
+        logger.debug(f"Generating spectrum image: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_TIMEOUT
+        )
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg spectrum generation failed: {result.stderr}")
+            return False
+
+        if not output_file.exists():
+            logger.error(f"Spectrum image was not created: {output_file}")
+            return False
+
+        logger.debug(f"Spectrum image generated: {output_file}")
+        return True
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"Spectrum generation timed out for {input_file}")
+        return False
+    except Exception as e:
+        logger.error(f"Error generating spectrum image: {e}")
+        return False
