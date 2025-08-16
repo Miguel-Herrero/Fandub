@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""
+Audio Project Structure Creator
+
+This script creates a standardized folder structure for audio editing projects,
+specifically designed for dubbing workflows with Reaper and AI stem separation.
+
+Usage:
+    python3 create_project_structure.py <target_directory>
+
+Example:
+    python3 create_project_structure.py "/path/to/Movie_TITLE_23976_48k"
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+
+def create_directory_structure(base_path):
+    """
+    Create the complete directory structure for an audio editing project.
+    
+    Args:
+        base_path (Path): The base directory where the structure will be created
+    """
+    directories = [
+        "00_sources/video",
+        "00_sources/audio",
+        "01_preproc",
+        "02_stems/EN",
+        "02_stems/ES",
+        "03_reaper/Media",
+        "03_reaper/Backups",
+        "04_intermediate",
+        "05_renders/audio",
+        "05_renders/video_mux",
+        "06_docs"
+    ]
+    
+    print(f"Creating directory structure in: {base_path}")
+    
+    for directory in directories:
+        dir_path = base_path / directory
+        try:
+            dir_path.mkdir(parents=True, exist_ok=True)
+            print(f"✓ Created: {directory}")
+        except Exception as e:
+            print(f"✗ Error creating {directory}: {e}")
+            return False
+    
+    return True
+
+
+def create_readme_file(base_path):
+    """
+    Create a README.txt file with the directory structure explanation.
+    
+    Args:
+        base_path (Path): The base directory where README.txt will be created
+    """
+    readme_content = """README — Guía de estructura y nombres (Reaper + doblaje ES sobre M&E EN)
+====================================================================================
+
+Objetivo
+--------
+Trabajar con orden y nombres consistentes para localizar rápido, evitar rutas rotas en Reaper
+y archivar la mezcla final de forma limpia.
+
+Estructura de carpetas (plantilla renumerada)
+---------------------------------------------
+Pelicula_<TITULO>_<FPSDEST>_<SR>/
+├─ 00_sources/                # intocable (copias originales)
+│  ├─ video/
+│  └─ audio/
+│     ├─ EN_full_48k24.wav
+│     └─ ES_full_25fps.ac3/mp3
+├─ 01_preproc/                # preparación ANTES de IA (operaciones "seguras")
+│  ├─ EN_full_48k24.wav            # transcodas a WAV 48k/24
+│  ├─ ES_full_48k24.wav
+│  └─ ES_full_23976_rt959.wav      # si aplicas retime global 25→23.976
+├─ 02_stems/                  # salidas del separador (IA)
+│  ├─ EN/  EN_ME_23976_48k24_lalal.wav
+│  └─ ES/  ES_VOX_23976_48k24_lalal.wav
+├─ 03_reaper/                 # sesión
+│  ├─ <TITULO>_ESdub.rpp
+│  ├─ Media/                  # copias internas de Reaper
+│  └─ Backups/                # autosaves .rpp-bak
+├─ 04_intermediate/           # ediciones TRAS IA (retime por escenas, sync, fades)
+│  ├─ ES_VOX_23976_rt_local.wav
+│  └─ EN_ME_eqfix.wav
+├─ 05_renders/                # mezclas y entregas
+│  ├─ audio/
+│  │  ├─ Mix_ESdub_v001_23976_48k24.wav
+│  │  └─ Mix_ESdub_v001_23976_48k24.ac3
+│  └─ video_mux/
+│     └─ <TITULO>_ESdub_v001_23976.mkv
+└─ 06_docs/                   # notas, hashes y verificación
+   ├─ notes.md
+   └─ checksums.sha256
+
+Qué hacer / Qué NO hacer por carpeta
+------------------------------------
+00_sources/
+  Haz: guardar originales tal cual; marcar fps y fuente.
+  No hagas: editar, renombrar ni mover. Solo lectura.
+
+01_preproc/  (operaciones "seguras" antes de IA)
+  Haz: transcodas a WAV 48k/24; remapeo de canales; corrección de offset constante
+       (syncfix±XXXms); ajuste de ganancia sin clipping; retime global 25→23.976 (rt959)
+       si es claramente global; de-MP3→WAV.
+  No hagas: NR agresiva, EQ/compresión fuertes, limitación dura. Perjudican a la IA.
+
+02_stems/  (resultados IA)
+  Haz: exportar siempre WAV 48k/24; etiquetar herramienta (lalal/uvr); mantener relación
+       con el origen preproc en el nombre.
+  No hagas: recomprimir a MP3/AAC; sobreescribir stems; mezclar versiones.
+
+03_reaper/
+  Haz: "Save project as…" aquí con "Create subdirectory" y "Copy all media…" activados;
+       presets con prefijo del proyecto; autosave a Backups/ cada 5 min.
+  No hagas: usar rutas absolutas fuera del árbol; borrar Media/ manualmente.
+
+04_intermediate/
+  Haz: retimes por escenas; cortes S; stretch markers; fades; EQ/compresión razonables;
+       archivos derivados claros (p.e. *_rtScene03, *_eqfix).
+  No hagas: perder la trazabilidad con nombres genéricos; trabajar encima de 02_stems.
+
+05_renders/
+  Haz: versionar (v001, v002…); picos ≤ −3 dBFS; anotar LUFS en notes.md; mantener
+       audio y vídeo separados.
+  No hagas: sobrescribir versiones; mezclar pruebas con entregas finales.
+
+06_docs/
+  Haz: bitácora (fuentes, retimes, cadena FX, LUFS, incidencias/timecode); hashes:
+       shasum -a 256 ../05_renders/audio/* > checksums.sha256
+  No hagas: dejar el proyecto sin notas mínimas.
+
+Convenciones de nombres
+-----------------------
+Prefijos idioma: EN = inglés, ES = castellano.
+Tipo de pista: ME = Music+Effects; VOX = diálogos; full = mezcla completa.
+Etiquetas:
+- fps destino: "25fps", "23976", "24".
+- muestreo+profundidad WAV: "48k24".
+- retime: "rt959" = playback rate 0.95904 (25→23.976). Usa "rt<xxx>" con 3 cifras.
+- herramienta de stems: "lalal", "uvr", etc.
+- versión de mezcla: "v001, v002, …".
+
+Ejemplos
+--------
+- Preproc ES a WAV:      ES_full_48k24.wav
+- Retime global ES:      ES_full_23976_rt959.wav
+- Stems IA EN:           EN_ME_23976_48k24_lalal.wav
+- Stems IA ES:           ES_VOX_23976_48k24_lalal.wav
+- Derivado post-IA:      ES_VOX_23976_rtScene03.wav
+- Mezcla final:          Mix_ESdub_v001_23976_48k24.wav
+- Remux vídeo:           Pelicula_<TITULO>_ESdub_v001_23976.mkv
+
+Reglas operativas
+-----------------
+1) Todo a 48 kHz. Convierte MP3/AC3 a WAV al entrar en 01_preproc.
+2) Etiqueta fps y estado en nombres. Usa guiones bajos; sin espacios.
+3) No muevas/renombres archivos en uso. Si lo haces, relink en Reaper.
+4) Versiona renders. No sobrescribas.
+
+Ajustes de proyecto en Reaper
+-----------------------------
+- Project Settings: Sample rate 48000. Timebase = Time. Video frame rate = 23.976 (si es el destino).
+- Guarda en 03_reaper/ con:
+  [x] Create subdirectory for project
+  [x] Copy all media into project directory
+- Autosave: .rpp-bak cada 5 min a 03_reaper/Backups/.
+- Presets/FX: prefijo <TITULO>_ESdub_*.
+
+Flujo mínimo recomendado
+------------------------
+1) 01_preproc: transcodas a WAV 48k/24; syncfix; gain; opcional retime global 25→23.976 (rt959).
+2) 02_stems: separar con IA; exportar WAV 48k/24.
+3) 03_reaper: crear sesión; importar stems; ruteo y sidechain.
+4) 04_intermediate: retimes por escenas; EQ/comp; reverb corta; ducking 1–2 dB.
+5) 05_renders/audio: render WAV 24-bit 48 kHz; picos ≤ −3 dBFS.
+6) 05_renders/video_mux: remux con vídeo si procede.
+7) 06_docs: anota cambios y LUFS; genera checksums.sha256.
+
+Wildcards útiles de render
+--------------------------
+- Directorio: 05_renders/audio
+- Nombre: $project_$region_$date_v$projectrendercount
+  Ej.: Pelicula_TITULO_ESdub_Dialogo_2025-08-15_v003.wav
+
+Higiene y archivado
+-------------------
+- Limpieza: "File → Clean current project directory…" para purgar huérfanos en 03_reaper/Media.
+- Copia fría: archiva 00_sources, 03_reaper, 05_renders y 06_docs. 01_preproc y 02_stems son recreables.
+- Verificación rápida: espectrograma y escucha A/B de un minuto crítico entre versiones.
+
+Errores comunes (y cómo evitarlos)
+----------------------------------
+- Desfase por fps: etiqueta 25fps/23976 desde el inicio; corrige antes de editar.
+- Retraso de MP3/AC3: alinea a transitorios reales, no al punto 0 del archivo.
+- Clipping: deja margen; picos ≤ −3 dBFS.
+- Fase rara tras M/S: comprueba mono-compatibilidad antes de mezclar.
+- Rutas rotas: no cambies nombres/carpeta tras guardar el .rpp.
+
+Glosario corto
+--------------
+- ME: Music & Effects (sin diálogos).
+- VOX: diálogos.
+- 23976: 23.976 fps.
+- rt959: playback rate 0.95904 (25→23.976).
+- LUFS: sonoridad integrada.
+
+Fin.
+"""
+    
+    readme_path = base_path / "README.txt"
+    try:
+        with open(readme_path, 'w', encoding='utf-8') as f:
+            f.write(readme_content)
+        print(f"✓ Created: README.txt")
+        return True
+    except Exception as e:
+        print(f"✗ Error creating README.txt: {e}")
+        return False
+
+
+def main():
+    """Main function to handle command line arguments and execute the script."""
+    parser = argparse.ArgumentParser(
+        description="Create standardized folder structure for audio editing projects"
+    )
+    parser.add_argument(
+        "target_directory",
+        help="Target directory where the structure will be created"
+    )
+    
+    args = parser.parse_args()
+    
+    # Convert to Path object and resolve
+    target_path = Path(args.target_directory).resolve()
+    
+    # Check if target directory exists, create if it doesn't
+    if not target_path.exists():
+        try:
+            target_path.mkdir(parents=True, exist_ok=True)
+            print(f"Created target directory: {target_path}")
+        except Exception as e:
+            print(f"Error creating target directory: {e}")
+            sys.exit(1)
+    
+    # Create directory structure
+    if not create_directory_structure(target_path):
+        print("Failed to create directory structure")
+        sys.exit(1)
+    
+    # Create README file
+    if not create_readme_file(target_path):
+        print("Failed to create README file")
+        sys.exit(1)
+    
+    print(f"\n✅ Project structure created successfully in: {target_path}")
+    print("\nNext steps:")
+    print("1. Copy your source files to 00_sources/")
+    print("2. Follow the workflow described in README.txt")
+
+
+if __name__ == "__main__":
+    main()
