@@ -111,6 +111,88 @@ def get_audio_info(input_file):
         return None
 
 
+def load_rnnoise_config():
+    """Load RNNoise model configuration from .env file."""
+    config_file = Path(__file__).parent / '.env'
+    config = {}
+
+    if not config_file.exists():
+        logger.warning(f"RNNoise config file not found: {config_file}")
+        return config
+
+    try:
+        with open(config_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    if value.strip():  # Only add non-empty values
+                        config[key.strip()] = value.strip()
+
+        logger.debug(f"Loaded RNNoise config: {len(config)} models")
+        return config
+
+    except Exception as e:
+        logger.warning(f"Error loading RNNoise config: {e}")
+        return {}
+
+
+def get_rnnoise_model_path(model_type="general_general"):
+    """
+    Get the path to a specific RNNoise model.
+
+    Args:
+        model_type: Format "type_context" where:
+                   type: general, voice, speech
+                   context: general, recording
+
+    Returns:
+        Path to model file or None if not found
+    """
+    config = load_rnnoise_config()
+
+    if not config:
+        return None
+
+    # Normalize model type
+    model_type = model_type.lower().replace('-', '_')
+    config_key = f"RNNOISE_{model_type.upper()}"
+
+    # Try to get the specific model
+    model_path = config.get(config_key)
+
+    # If not found, try default
+    if not model_path:
+        default_key = config.get('RNNOISE_DEFAULT', 'GENERAL_GENERAL')
+        model_path = config.get(f"RNNOISE_{default_key}")
+
+    if not model_path:
+        return None
+
+    # Check if file exists
+    path_obj = Path(model_path)
+    if path_obj.exists():
+        return str(path_obj)
+    else:
+        logger.warning(f"RNNoise model file not found: {model_path}")
+        return None
+
+
+def list_available_rnnoise_models():
+    """List all available RNNoise models from config."""
+    config = load_rnnoise_config()
+    available = []
+
+    for key, path in config.items():
+        if key.startswith('RNNOISE_') and key != 'RNNOISE_DEFAULT':
+            # Extract model type from key
+            model_name = key.replace('RNNOISE_', '').lower()
+            if Path(path).exists():
+                available.append(model_name)
+
+    return available
+
+
 def generate_spectrum_image(input_file, output_file):
     """Generate a spectrum visualization image from an audio file."""
     try:
@@ -306,8 +388,8 @@ Status: {'Success' if success else 'Failed'}
 
 
 def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False,
-                    remove_hum=False, denoise=False, normalize=False,
-                    start_time=None, end_time=None, overwrite=False, dry_run=False):
+                    remove_hum=False, denoise=False, denoise_model="general_general",
+                    normalize=False, start_time=None, end_time=None, overwrite=False, dry_run=False):
     """
     Flexible audio preprocessing pipeline.
 
@@ -318,6 +400,7 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
         remove_hiss: Remove background hiss noise
         remove_hum: Remove electrical hum (50 Hz + harmonics)
         denoise: Apply general noise reduction
+        denoise_model: RNNoise model type (format: "type_context")
         normalize: Apply EBU R128 normalization (-23 LUFS)
         start_time: Start time in seconds (for time range selection)
         end_time: End time in seconds (for time range selection)
@@ -392,9 +475,9 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
     # 2. Remove electrical hum (50 Hz + harmonics)
     if remove_hum:
         # Notch filters for 50 Hz, 100 Hz, 150 Hz (European electrical)
-        filter_chain.append('anequalizer=f=50:t=o:w=2:g=-20')
-        filter_chain.append('anequalizer=f=100:t=o:w=2:g=-12')
-        filter_chain.append('anequalizer=f=150:t=o:w=2:g=-9')
+        filter_chain.append('equalizer=f=50:t=o:w=2:g=-20')
+        filter_chain.append('equalizer=f=100:t=o:w=2:g=-12')
+        filter_chain.append('equalizer=f=150:t=o:w=2:g=-9')
 
     # 3. Remove background hiss
     if remove_hiss:
@@ -403,18 +486,28 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
 
     # 4. General noise reduction
     if denoise:
-        # Try RNNoise first, fallback to afftdn
+        # Try RNNoise with configured model, fallback to afftdn
+        rnnoise_model_path = get_rnnoise_model_path(denoise_model)
+
         try:
             # Check if RNNoise is available
             result = subprocess.run(['ffmpeg', '-filters'], capture_output=True, text=True, timeout=5)
-            if 'arnndn' in result.stdout:
-                filter_chain.append('arnndn')
+
+            if 'arnndn' in result.stdout and rnnoise_model_path:
+                filter_chain.append(f'arnndn=m={rnnoise_model_path}')
+                model_name = Path(rnnoise_model_path).stem
+                logger.info(f"Using RNNoise model: {denoise_model} ({model_name})")
             else:
                 # Fallback to conservative afftdn
                 filter_chain.append('afftdn=nr=6:nf=-30:tn=1')
+                if 'arnndn' not in result.stdout:
+                    logger.info("RNNoise not available, using afftdn")
+                else:
+                    logger.info(f"RNNoise model '{denoise_model}' not found, using afftdn")
         except:
             # Fallback to afftdn
             filter_chain.append('afftdn=nr=6:nf=-30:tn=1')
+            logger.info("Error checking RNNoise, using afftdn")
 
     # 5. Loudness normalization (-23 LUFS) - ALWAYS LAST
     if normalize:
@@ -581,10 +674,10 @@ All processing is done in a single FFmpeg pass for maximum quality.
         """
     )
     
-    # Required arguments
-    parser.add_argument('-i', '--input', required=True,
+    # Required arguments (except for --list-denoise-models)
+    parser.add_argument('-i', '--input',
                        help='Input audio file (any format: MP3, AAC, WAV, etc.)')
-    parser.add_argument('-o', '--output', required=True,
+    parser.add_argument('-o', '--output',
                        help='Output preprocessed WAV file (full path with professional filename)')
 
     # Processing options
@@ -594,8 +687,10 @@ All processing is done in a single FFmpeg pass for maximum quality.
                        help='Remove background hiss noise (8 dB reduction, conservative)')
     parser.add_argument('--remove-hum', action='store_true',
                        help='Remove electrical hum (50/100/150 Hz notch filters)')
-    parser.add_argument('--denoise', action='store_true',
-                       help='Apply general noise reduction (RNNoise if available)')
+    parser.add_argument('--denoise', type=str, nargs='?', const='general_general',
+                       help='Apply general noise reduction with RNNoise model (format: type_context)')
+    parser.add_argument('--list-denoise-models', action='store_true',
+                       help='List available RNNoise models and exit')
     parser.add_argument('--normalize', action='store_true',
                        help='Apply EBU R128 normalization (-23 LUFS for stem splitting)')
 
@@ -622,6 +717,34 @@ All processing is done in a single FFmpeg pass for maximum quality.
     # Set logging level
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Handle list-denoise-models option first (doesn't need input/output)
+    if args.list_denoise_models:
+        print("🎛️  Available RNNoise Models")
+        print("=" * 40)
+
+        available_models = list_available_rnnoise_models()
+
+        if available_models:
+            from pathlib import Path as PathLib
+            for model in available_models:
+                model_path = get_rnnoise_model_path(model)
+                if model_path:
+                    model_name = PathLib(model_path).stem
+                    print(f"• {model} ({model_name})")
+                else:
+                    print(f"• {model} (not found)")
+        else:
+            print("No RNNoise models configured or found")
+            print("Check your .env file configuration")
+
+        print(f"\nUsage: --denoise=MODEL_TYPE")
+        print(f"Example: --denoise=general_general")
+        return 0
+
+    # Check required arguments for normal operation
+    if not args.input or not args.output:
+        parser.error("Input (-i) and output (-o) arguments are required")
 
     # Check dependencies
     print("🎛️  Flexible Audio Preprocessor")
@@ -685,7 +808,7 @@ All processing is done in a single FFmpeg pass for maximum quality.
         return 0
 
     # Check if any processing options are specified
-    has_processing = any([args.high_pass, args.remove_hiss, args.remove_hum, args.denoise, args.normalize])
+    has_processing = any([args.high_pass, args.remove_hiss, args.remove_hum, bool(args.denoise), args.normalize])
 
     if not has_processing:
         logger.warning("No processing options specified. Only format conversion will be performed.")
@@ -699,7 +822,8 @@ All processing is done in a single FFmpeg pass for maximum quality.
         high_pass=args.high_pass,
         remove_hiss=args.remove_hiss,
         remove_hum=args.remove_hum,
-        denoise=args.denoise,
+        denoise=bool(args.denoise),
+        denoise_model=args.denoise or "general_general",
         normalize=args.normalize,
         start_time=start_seconds,
         end_time=end_seconds,

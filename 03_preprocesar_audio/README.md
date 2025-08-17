@@ -29,7 +29,7 @@ Preparar completamente el audio seleccionado del Paso 2 para el proceso de separ
 - `--high-pass` - Filtro de altas frecuencias (80 Hz, 2 poles)
 - `--remove-hiss` - Elimina siseo de fondo (8 dB reducción conservadora)
 - `--remove-hum` - Elimina zumbido eléctrico (50/100/150 Hz)
-- `--denoise` - Reducción general de ruido (RNNoise si disponible)
+- `--denoise` - Reducción general de ruido (RNNoise con modelo lq.rnnn)
 - `--normalize` - Normalización EBU R128 (-23 LUFS)
 
 **Opciones de testing:**
@@ -95,8 +95,8 @@ final/SherlockHolmes_ES_MIX_final_v01.wav
 ```bash
 # Analizar audio y obtener sugerencias
 ./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/output.wav \
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/output.wav \
   --auto-detect-noise
 
 # Salida ejemplo:
@@ -116,8 +116,8 @@ final/SherlockHolmes_ES_MIX_final_v01.wav
 ```bash
 # Solo high-pass y normalización
 ./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
   --high-pass --normalize
 ```
 
@@ -135,36 +135,60 @@ final/SherlockHolmes_ES_MIX_final_v01.wav
   -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
   --high-pass --remove-hum --normalize
 
-# Para casos muy ruidosos
+# Para casos muy ruidosos (con RNNoise específico para voces)
 ./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
-  --high-pass --remove-hiss --remove-hum --denoise --normalize
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --remove-hiss --remove-hum --denoise=voice_recording --normalize
 ```
 
-### **4. Testing en Segmentos**
+### **4. Casos Específicos por Tipo de Contenido**
+```bash
+# Doblaje/Voces (recomendado para tu caso)
+./03_preprocesar_audio/preprocess_audio \
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/output.wav \
+  --high-pass --remove-hiss --denoise=voice_recording --normalize
+
+# Podcasts/Discurso
+./03_preprocesar_audio/preprocess_audio \
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/output.wav \
+  --high-pass --denoise=speech_recording --normalize
+
+# Contenido mixto (música + voces)
+./03_preprocesar_audio/preprocess_audio \
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/output.wav \
+  --high-pass --denoise=general_recording --normalize
+```
+
+### **5. Testing en Segmentos**
 ```bash
 # Probar en un segmento pequeño primero
 ./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/test_segment.wav \
-  --high-pass --remove-hiss --normalize \
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/test_segment.wav \
+  --high-pass --remove-hiss --denoise=voice_recording --normalize \
   --from 1:30 --to 1:45
 
 # Si suena bien, procesar archivo completo
 ./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
-  --high-pass --remove-hiss --normalize
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/SherlockHolmes_EN_MIX_preprocessed_v01.wav \
+  --high-pass --remove-hiss --denoise=voice_recording --normalize
 ```
 
-### **5. Dry-run para Verificar**
+### **6. Dry-run para Verificar**
 ```bash
 # Ver qué se procesaría sin crear archivo
 ./03_preprocesar_audio/preprocess_audio \
-  -i samples/sherlock_episode1.mp3 \
-  -o processed/output.wav \
-  --high-pass --normalize --dry-run
+  -i tests/00_sources/audio.mp3 \
+  -o tests/02_preproc/output.wav \
+  --high-pass --denoise=voice_recording --normalize --dry-run
+
+# Listar modelos RNNoise disponibles
+./03_preprocesar_audio/preprocess_audio --list-denoise-models
 ```
 
 ## Trazabilidad del Procesamiento
@@ -251,14 +275,65 @@ Se crea automáticamente una imagen del espectro junto al archivo procesado:
 
 **Ejemplo de uso:**
 ```bash
-# Procesar audio
-./preprocess_audio -i audio.mp3 -o processed/output.wav --high-pass --remove-hiss --normalize
+# Procesar audio con modelo específico
+./preprocess_audio -i audio.mp3 -o processed/output.wav --high-pass --remove-hiss --denoise=voice_recording --normalize
 
 # Archivos generados:
 # - processed/output.wav (audio procesado)
 # - processed/output.log (log detallado)
 # - processed/output.png (visualización del espectro)
 ```
+
+## Configuración de Modelos RNNoise
+
+### **Instalación de Modelos**
+
+1. **Descargar modelos** desde el repositorio oficial:
+   ```bash
+   git clone https://github.com/GregorR/rnnoise-models.git
+   ```
+
+2. **Configurar rutas** en el archivo `.env`:
+   ```bash
+   # Copiar plantilla
+   cp 03_preprocesar_audio/.env.example 03_preprocesar_audio/.env
+
+   # Editar rutas según tu instalación
+   nano 03_preprocesar_audio/.env
+   ```
+
+### **Estructura del Archivo .env**
+
+```bash
+# Matriz de modelos: [General|Voice|Speech] x [General|Recording]
+RNNOISE_GENERAL_GENERAL=/path/to/marathon-prescription-2018-08-29/mp.rnnn
+RNNOISE_GENERAL_RECORDING=/path/to/conjoined-burgers-2018-08-28/cb.rnnn
+RNNOISE_VOICE_GENERAL=/path/to/leavened-quisling-2018-08-31/lq.rnnn
+RNNOISE_VOICE_RECORDING=/path/to/beguiling-drafter-2018-08-30/bd.rnnn
+RNNOISE_SPEECH_RECORDING=/path/to/somnolent-hogwash-2018-09-01/sh.rnnn
+
+# Modelo por defecto
+RNNOISE_DEFAULT=GENERAL_GENERAL
+```
+
+### **Uso de Modelos Específicos**
+
+```bash
+# Listar modelos disponibles
+./preprocess_audio --list-denoise-models
+
+# Usar modelo específico
+./preprocess_audio -i input.mp3 -o output.wav --denoise=voice_recording --normalize
+
+# Usar modelo por defecto
+./preprocess_audio -i input.mp3 -o output.wav --denoise --normalize
+```
+
+**Recomendaciones por tipo de contenido:**
+- **Doblaje/Voces**: `voice_recording` - Optimizado para voces en grabaciones
+- **Podcasts/Speech**: `speech_recording` - Optimizado para discurso
+- **Contenido mixto**: `general_recording` - Balanceado para grabaciones
+- **Uso general**: `general_general` - Modelo por defecto
 
 ### **Parámetros del Preprocesamiento**
 
@@ -277,6 +352,21 @@ El preprocesador usa configuraciones fijas optimizadas para doblaje:
 - **Target:** -23 LUFS (conservador, preserva dinámicas)
 - **True Peak:** -2 dBFS (headroom seguro)
 - **LRA:** 7 LU (mantiene variaciones naturales)
+
+#### **Reducción General de Ruido (--denoise)**
+- **Algoritmo:** RNNoise (Red Neural Recurrente)
+- **Modelos disponibles:** Matriz 3×2 (General/Voice/Speech × General/Recording)
+- **Fuente:** https://github.com/GregorR/rnnoise-models
+- **Configuración:** Archivo `.env` (no comiteable)
+- **Fallback:** afftdn (6 dB reducción) si RNNoise no está disponible
+- **Ventajas:** Preserva mejor las voces que filtros tradicionales
+
+**Modelos configurados:**
+- `general_general` - Uso general (marathon-prescription)
+- `general_recording` - Grabaciones generales (conjoined-burgers)
+- `voice_general` - Voces en general (leavened-quisling)
+- `voice_recording` - Voces en grabaciones (beguiling-drafter)
+- `speech_recording` - Discurso en grabaciones (somnolent-hogwash)
 
 ## Casos de Uso
 
@@ -438,7 +528,7 @@ Una vez completado el preprocesamiento:
 - ✅ **Filtro de altas frecuencias** - Opcional (--high-pass, 80 Hz, 2 poles)
 - ✅ **Eliminación de siseo** - Opcional (--remove-hiss, 8 dB reducción conservadora)
 - ✅ **Eliminación de zumbido** - Opcional (--remove-hum, 50/100/150 Hz)
-- ✅ **Reducción general de ruido** - Opcional (--denoise, RNNoise si disponible)
+- ✅ **Reducción general de ruido** - Opcional (--denoise=modelo, RNNoise parametrizado)
 - ✅ **Normalización** - Opcional (--normalize, -23 LUFS conservador)
 - ✅ **Procesamiento por segmentos** - Implementado (--from/--to para testing)
 - ✅ **Auto-detección de ruido** - Implementado (--auto-detect-noise con análisis distribuido)
@@ -446,3 +536,5 @@ Una vez completado el preprocesamiento:
 - ✅ **Trazabilidad completa** - Comando FFmpeg mostrado + log automático
 - ✅ **Logs de procesamiento** - Archivo .log con todos los detalles
 - ✅ **Visualización del espectro** - Imagen PNG automática del audio procesado
+- ✅ **Configuración de modelos RNNoise** - Sistema parametrizado con archivo .env
+- ✅ **Múltiples modelos RNNoise** - 6 modelos especializados por tipo de contenido
