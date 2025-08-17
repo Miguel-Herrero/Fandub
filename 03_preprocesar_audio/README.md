@@ -31,11 +31,17 @@ Preparar completamente el audio seleccionado del Paso 2 para el proceso de separ
 - `--remove-hum` - Elimina zumbido eléctrico (50/100/150 Hz)
 - `--denoise` - Reducción general de ruido (RNNoise con modelo lq.rnnn)
 - `--normalize` - Normalización EBU R128 (-23 LUFS)
+- `--fps-convert` - Conversión de velocidad para sincronización (formato: origen:destino)
 
 **Opciones de testing:**
 - `--from TIME --to TIME` - Procesar solo un segmento (formato: mm:ss o hh:mm:ss)
 - `--auto-detect-noise` - Analizar audio y sugerir filtros
 - `--dry-run` - Mostrar qué se procesaría sin crear archivo
+
+**Sincronización FPS:**
+- **Conversión automática** - Ajusta velocidad sin cambiar pitch
+- **Preserva timbre** - Las voces mantienen su sonoridad natural
+- **Casos comunes** - 25→23.976 fps, 24→25 fps, etc.
 
 **Trazabilidad:**
 - **Comando FFmpeg completo** - Se muestra en pantalla para referencia
@@ -144,11 +150,11 @@ final/SherlockHolmes_ES_MIX_final_v01.wav
 
 ### **4. Casos Específicos por Tipo de Contenido**
 ```bash
-# Doblaje/Voces (recomendado para tu caso)
+# Doblaje/Voces con sincronización FPS (recomendado para tu caso)
 ./03_preprocesar_audio/preprocess_audio \
   -i tests/00_sources/audio.mp3 \
   -o tests/02_preproc/output.wav \
-  --high-pass --remove-hiss --denoise=voice_recording --normalize
+  --fps-convert=25:23.976 --high-pass --remove-hiss --denoise=voice_recording --normalize
 
 # Podcasts/Discurso
 ./03_preprocesar_audio/preprocess_audio \
@@ -334,6 +340,66 @@ RNNOISE_DEFAULT=GENERAL_GENERAL
 - **Podcasts/Speech**: `speech_recording` - Optimizado para discurso
 - **Contenido mixto**: `general_recording` - Balanceado para grabaciones
 - **Uso general**: `general_general` - Modelo por defecto
+
+## Conversión de FPS para Sincronización
+
+### **¿Cuándo Usar --fps-convert?**
+
+La conversión FPS es necesaria cuando el audio doblado fue grabado pensando en una velocidad de reproducción diferente a la del video final:
+
+**Casos comunes:**
+- **Video original**: 23.976 fps (NTSC)
+- **Audio doblado**: Grabado para 25 fps (PAL)
+- **Resultado**: Audio 4% más rápido que debería
+
+### **Sintaxis y Ejemplos**
+
+```bash
+# Formato: --fps-convert=origen:destino
+--fps-convert=25:23.976    # De PAL a NTSC (4.1% más lento)
+--fps-convert=24:25        # De Film a PAL (4.2% más rápido)
+--fps-convert=23.976:25    # De NTSC a PAL (4.3% más rápido)
+```
+
+### **Casos de Uso Específicos**
+
+```bash
+# Caso 1: Audio castellano grabado a 25 fps, video original a 23.976 fps
+./preprocess_audio -i castellano.mp3 -o castellano_sync.wav \
+  --fps-convert=25:23.976 --high-pass --denoise=voice_recording --normalize
+
+# Caso 2: Convertir de film (24 fps) a PAL (25 fps)
+./preprocess_audio -i film_audio.wav -o pal_audio.wav \
+  --fps-convert=24:25 --normalize
+
+# Caso 3: Verificar conversión sin procesar
+./preprocess_audio -i input.mp3 -o output.wav \
+  --fps-convert=25:23.976 --dry-run
+```
+
+### **Ventajas del Método `atempo`**
+
+| Aspecto | `atempo` (Usado) | Cambio Sample Rate |
+|---------|------------------|-------------------|
+| **Pitch/Timbre** | ✅ Preservado | ❌ Alterado |
+| **Calidad** | ✅ Time-stretch profesional | ⚠️ Interpolación simple |
+| **Sample Rate** | ✅ 48kHz estándar | ❌ No estándar |
+| **Compatibilidad** | ✅ Postproducción | ⚠️ Limitada |
+
+### **Orden de Procesamiento**
+
+```bash
+# Orden correcto (automático en el preprocesador):
+1. FPS conversion (atempo)     ← PRIMERO
+2. Format conversion (WAV)
+3. High-pass filter
+4. Noise reduction
+5. Normalization               ← ÚLTIMO
+```
+
+**¿Por qué este orden?**
+- **FPS conversion primero**: Todos los filtros actúan sobre el audio ya en la velocidad correcta
+- **Preserva calidad**: Evita múltiples procesamientos de tiempo
 
 ### **Parámetros del Preprocesamiento**
 
@@ -538,3 +604,4 @@ Una vez completado el preprocesamiento:
 - ✅ **Visualización del espectro** - Imagen PNG automática del audio procesado
 - ✅ **Configuración de modelos RNNoise** - Sistema parametrizado con archivo .env
 - ✅ **Múltiples modelos RNNoise** - 6 modelos especializados por tipo de contenido
+- ✅ **Conversión FPS** - Sincronización automática con preservación de pitch (--fps-convert)

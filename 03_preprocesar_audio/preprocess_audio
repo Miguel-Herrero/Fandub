@@ -193,6 +193,56 @@ def list_available_rnnoise_models():
     return available
 
 
+def parse_fps_conversion(fps_convert_str):
+    """
+    Parse FPS conversion string and return atempo factor.
+
+    Args:
+        fps_convert_str: String in format "source_fps:target_fps" (e.g., "25:23.976")
+
+    Returns:
+        float: atempo factor for FFmpeg, or None if invalid
+    """
+    try:
+        if ':' not in fps_convert_str:
+            logger.error("FPS conversion format should be 'source:target' (e.g., '25:23.976')")
+            return None
+
+        source_fps_str, target_fps_str = fps_convert_str.split(':', 1)
+        source_fps = float(source_fps_str)
+        target_fps = float(target_fps_str)
+
+        if source_fps <= 0 or target_fps <= 0:
+            logger.error("FPS values must be positive numbers")
+            return None
+
+        # Calculate atempo factor: target/source
+        factor = target_fps / source_fps
+
+        # atempo filter has limits: 0.5 <= factor <= 100.0
+        if factor < 0.5 or factor > 100.0:
+            logger.error(f"FPS conversion factor {factor:.6f} is outside atempo limits (0.5-100.0)")
+            return None
+
+        logger.info(f"FPS conversion: {source_fps} → {target_fps} fps (factor: {factor:.6f})")
+
+        # Log the percentage change for clarity
+        percent_change = (factor - 1) * 100
+        if percent_change > 0:
+            logger.info(f"Audio will be {percent_change:.2f}% faster")
+        else:
+            logger.info(f"Audio will be {abs(percent_change):.2f}% slower")
+
+        return factor
+
+    except ValueError as e:
+        logger.error(f"Invalid FPS values: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error parsing FPS conversion: {e}")
+        return None
+
+
 def generate_spectrum_image(input_file, output_file):
     """Generate a spectrum visualization image from an audio file."""
     try:
@@ -322,7 +372,7 @@ def format_duration(seconds):
 
 def create_processing_log(output_file, input_file, cmd, audio_info,
                          high_pass, remove_hiss, remove_hum, denoise, normalize,
-                         start_time, end_time, success):
+                         fps_convert, start_time, end_time, success):
     """Create a processing log file with all the details."""
     try:
         # Create log filename based on output file
@@ -345,6 +395,7 @@ Duration: {format_duration(audio_info['duration'])} ({audio_info['duration']:.1f
 Bit Rate: {audio_info['bit_rate'] or 'Unknown'} bps
 
 ## Processing Options
+FPS conversion: {'Yes (' + fps_convert + ')' if fps_convert else 'No'}
 High-pass filter (80 Hz): {'Yes' if high_pass else 'No'}
 Remove hiss: {'Yes' if remove_hiss else 'No'}
 Remove hum (50/100/150 Hz): {'Yes' if remove_hum else 'No'}
@@ -389,7 +440,8 @@ Status: {'Success' if success else 'Failed'}
 
 def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False,
                     remove_hum=False, denoise=False, denoise_model="general_general",
-                    normalize=False, start_time=None, end_time=None, overwrite=False, dry_run=False):
+                    normalize=False, fps_convert=None, start_time=None, end_time=None,
+                    overwrite=False, dry_run=False):
     """
     Flexible audio preprocessing pipeline.
 
@@ -402,6 +454,7 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
         denoise: Apply general noise reduction
         denoise_model: RNNoise model type (format: "type_context")
         normalize: Apply EBU R128 normalization (-23 LUFS)
+        fps_convert: FPS conversion string (format: "source:target")
         start_time: Start time in seconds (for time range selection)
         end_time: End time in seconds (for time range selection)
         overwrite: Whether to overwrite existing output file
@@ -467,6 +520,15 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
 
     # Build audio filter chain
     filter_chain = []
+
+    # 0. FPS conversion (FIRST - before any other processing)
+    atempo_factor = None
+    if fps_convert:
+        atempo_factor = parse_fps_conversion(fps_convert)
+        if atempo_factor is None:
+            logger.error("Invalid FPS conversion, aborting")
+            return False
+        filter_chain.append(f'atempo={atempo_factor:.6f}')
 
     # 1. High-pass filter (80 Hz, 2 poles) - removes low frequency noise
     if high_pass:
@@ -544,7 +606,14 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
         logger.info(f"Time range: {start_str} to {end_str}")
 
     # Show processing steps
-    steps = ["Converting to WAV (48kHz, 16-bit, stereo)"]
+    steps = []
+    if fps_convert and atempo_factor:
+        percent_change = abs((atempo_factor - 1) * 100)
+        direction = "faster" if atempo_factor > 1 else "slower"
+        steps.append(f"FPS conversion ({percent_change:.2f}% {direction})")
+
+    steps.append("Converting to WAV (48kHz, 16-bit, stereo)")
+
     if high_pass:
         steps.append("High-pass filter (80 Hz, 2 poles)")
     if remove_hum:
@@ -615,6 +684,7 @@ def preprocess_audio(input_file, output_file, high_pass=False, remove_hiss=False
                 remove_hum=remove_hum,
                 denoise=denoise,
                 normalize=normalize,
+                fps_convert=fps_convert,
                 start_time=start_time,
                 end_time=end_time,
                 success=success
@@ -693,6 +763,10 @@ All processing is done in a single FFmpeg pass for maximum quality.
                        help='List available RNNoise models and exit')
     parser.add_argument('--normalize', action='store_true',
                        help='Apply EBU R128 normalization (-23 LUFS for stem splitting)')
+
+    # FPS conversion option
+    parser.add_argument('--fps-convert', dest='fps_convert',
+                       help='Convert FPS (format: source:target, e.g., "25:23.976")')
 
     # Time range options
     parser.add_argument('--from', dest='start_time', type=str,
@@ -825,6 +899,7 @@ All processing is done in a single FFmpeg pass for maximum quality.
         denoise=bool(args.denoise),
         denoise_model=args.denoise or "general_general",
         normalize=args.normalize,
+        fps_convert=args.fps_convert,
         start_time=start_seconds,
         end_time=end_seconds,
         overwrite=args.overwrite,
