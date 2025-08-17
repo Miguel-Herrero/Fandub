@@ -27,15 +27,15 @@ def create_directory_structure(base_path):
     directories = [
         "00_sources/video",
         "00_sources/audio",
-        "01_preproc",
+        "01_preprocessing",
         "02_stems/EN",
         "02_stems/ES",
-        "03_reaper/Media",
-        "03_reaper/Backups",
-        "04_intermediate",
-        "05_renders/audio",
-        "05_renders/video_mux",
-        "06_docs"
+        "03_postprocessing",
+        "04_reaper/Media",
+        "04_reaper/Backups",
+        "05_edition",
+        "06_renders/audio",
+        "06_renders/video_mux"
     ]
     
     print(f"Creating directory structure in: {base_path}")
@@ -67,37 +67,37 @@ Objetivo
 Trabajar con orden y nombres consistentes para localizar rápido, evitar rutas rotas en Reaper
 y archivar la mezcla final de forma limpia.
 
-Estructura de carpetas (plantilla renumerada)
----------------------------------------------
+Estructura de carpetas (plantilla reestructurada)
+-------------------------------------------------
 Pelicula_<TITULO>_<FPSDEST>_<SR>/
 ├─ 00_sources/                # intocable (copias originales)
 │  ├─ video/
 │  └─ audio/
 │     ├─ EN_full_48k24.wav
 │     └─ ES_full_25fps.ac3/mp3
-├─ 01_preproc/                # preparación ANTES de IA (operaciones "seguras")
+├─ 01_preprocessing/          # preparación ANTES de IA (operaciones "seguras")
 │  ├─ EN_full_48k24.wav            # transcodas a WAV 48k/24
 │  ├─ ES_full_48k24.wav
 │  └─ ES_full_23976_rt959.wav      # si aplicas retime global 25→23.976
 ├─ 02_stems/                  # salidas del separador (IA)
 │  ├─ EN/  EN_ME_23976_48k24_lalal.wav
 │  └─ ES/  ES_VOX_23976_48k24_lalal.wav
-├─ 03_reaper/                 # sesión
+├─ 03_postprocessing/         # stems mejorados técnicamente (denoise, EQ)
+│  ├─ EN_ME_23976_48k24_denoised.wav
+│  └─ ES_VOX_23976_48k24_eq.wav
+├─ 04_reaper/                 # sesión de Reaper
 │  ├─ <TITULO>_ESdub.rpp
 │  ├─ Media/                  # copias internas de Reaper
 │  └─ Backups/                # autosaves .rpp-bak
-├─ 04_intermediate/           # ediciones TRAS IA (retime por escenas, sync, fades)
+├─ 05_edition/                # trabajo creativo con Reaper (recortes, 5.1, correcciones)
 │  ├─ ES_VOX_23976_rt_local.wav
-│  └─ EN_ME_eqfix.wav
-├─ 05_renders/                # mezclas y entregas
-│  ├─ audio/
-│  │  ├─ Mix_ESdub_v001_23976_48k24.wav
-│  │  └─ Mix_ESdub_v001_23976_48k24.ac3
-│  └─ video_mux/
-│     └─ <TITULO>_ESdub_v001_23976.mkv
-└─ 06_docs/                   # notas, hashes y verificación
-   ├─ notes.md
-   └─ checksums.sha256
+│  └─ EN_ME_51mix.wav
+└─ 06_renders/                # archivo final masterizado
+   ├─ audio/
+   │  ├─ Mix_ESdub_v001_23976_48k24.wav
+   │  └─ Mix_ESdub_v001_23976_48k24.ac3
+   └─ video_mux/
+      └─ <TITULO>_ESdub_v001_23976.mkv
 
 Qué hacer / Qué NO hacer por carpeta
 ------------------------------------
@@ -105,7 +105,7 @@ Qué hacer / Qué NO hacer por carpeta
   Haz: guardar originales tal cual; marcar fps y fuente.
   No hagas: editar, renombrar ni mover. Solo lectura.
 
-01_preproc/  (operaciones "seguras" antes de IA)
+01_preprocessing/  (operaciones "seguras" antes de IA)
   Haz: transcodas a WAV 48k/24; remapeo de canales; corrección de offset constante
        (syncfix±XXXms); ajuste de ganancia sin clipping; retime global 25→23.976 (rt959)
        si es claramente global; de-MP3→WAV.
@@ -113,28 +113,28 @@ Qué hacer / Qué NO hacer por carpeta
 
 02_stems/  (resultados IA)
   Haz: exportar siempre WAV 48k/24; etiquetar herramienta (lalal/uvr); mantener relación
-       con el origen preproc en el nombre.
+       con el origen preprocessing en el nombre.
   No hagas: recomprimir a MP3/AAC; sobreescribir stems; mezclar versiones.
 
-03_reaper/
+03_postprocessing/  (stems mejorados técnicamente)
+  Haz: denoise, EQ correctivo, compresión suave; mejoras técnicas que no afecten timing;
+       mantener trazabilidad con nombres claros (*_denoised, *_eq, *_comp).
+  No hagas: cambios creativos o de timing; trabajar directamente sobre 02_stems.
+
+04_reaper/
   Haz: "Save project as…" aquí con "Create subdirectory" y "Copy all media…" activados;
        presets con prefijo del proyecto; autosave a Backups/ cada 5 min.
   No hagas: usar rutas absolutas fuera del árbol; borrar Media/ manualmente.
 
-04_intermediate/
-  Haz: retimes por escenas; cortes S; stretch markers; fades; EQ/compresión razonables;
-       archivos derivados claros (p.e. *_rtScene03, *_eqfix).
-  No hagas: perder la trazabilidad con nombres genéricos; trabajar encima de 02_stems.
+05_edition/  (trabajo creativo con Reaper)
+  Haz: recortes creativos; mezcla 5.1; correcciones artísticas; retimes por escenas;
+       stretch markers; fades; efectos creativos; ducking; reverb.
+  No hagas: perder la trazabilidad con nombres genéricos; cambios técnicos básicos.
 
-05_renders/
-  Haz: versionar (v001, v002…); picos ≤ −3 dBFS; anotar LUFS en notes.md; mantener
-       audio y vídeo separados.
+06_renders/  (archivo final masterizado)
+  Haz: versionar (v001, v002…); picos ≤ −3 dBFS; masterización final; mantener
+       audio y vídeo separados; documentar LUFS y especificaciones técnicas.
   No hagas: sobrescribir versiones; mezclar pruebas con entregas finales.
-
-06_docs/
-  Haz: bitácora (fuentes, retimes, cadena FX, LUFS, incidencias/timecode); hashes:
-       shasum -a 256 ../05_renders/audio/* > checksums.sha256
-  No hagas: dejar el proyecto sin notas mínimas.
 
 Convenciones de nombres
 -----------------------
@@ -149,13 +149,14 @@ Etiquetas:
 
 Ejemplos
 --------
-- Preproc ES a WAV:      ES_full_48k24.wav
-- Retime global ES:      ES_full_23976_rt959.wav
-- Stems IA EN:           EN_ME_23976_48k24_lalal.wav
-- Stems IA ES:           ES_VOX_23976_48k24_lalal.wav
-- Derivado post-IA:      ES_VOX_23976_rtScene03.wav
-- Mezcla final:          Mix_ESdub_v001_23976_48k24.wav
-- Remux vídeo:           Pelicula_<TITULO>_ESdub_v001_23976.mkv
+- Preprocessing ES a WAV:    ES_full_48k24.wav
+- Retime global ES:          ES_full_23976_rt959.wav
+- Stems IA EN:               EN_ME_23976_48k24_lalal.wav
+- Stems IA ES:               ES_VOX_23976_48k24_lalal.wav
+- Postprocessing técnico:    ES_VOX_23976_48k24_denoised.wav
+- Edition creativa:          ES_VOX_23976_rtScene03.wav
+- Mezcla final:              Mix_ESdub_v001_23976_48k24.wav
+- Remux vídeo:               Pelicula_<TITULO>_ESdub_v001_23976.mkv
 
 Reglas operativas
 -----------------
@@ -167,32 +168,32 @@ Reglas operativas
 Ajustes de proyecto en Reaper
 -----------------------------
 - Project Settings: Sample rate 48000. Timebase = Time. Video frame rate = 23.976 (si es el destino).
-- Guarda en 03_reaper/ con:
+- Guarda en 04_reaper/ con:
   [x] Create subdirectory for project
   [x] Copy all media into project directory
-- Autosave: .rpp-bak cada 5 min a 03_reaper/Backups/.
+- Autosave: .rpp-bak cada 5 min a 04_reaper/Backups/.
 - Presets/FX: prefijo <TITULO>_ESdub_*.
 
 Flujo mínimo recomendado
 ------------------------
-1) 01_preproc: transcodas a WAV 48k/24; syncfix; gain; opcional retime global 25→23.976 (rt959).
+1) 01_preprocessing: transcodas a WAV 48k/24; syncfix; gain; opcional retime global 25→23.976 (rt959).
 2) 02_stems: separar con IA; exportar WAV 48k/24.
-3) 03_reaper: crear sesión; importar stems; ruteo y sidechain.
-4) 04_intermediate: retimes por escenas; EQ/comp; reverb corta; ducking 1–2 dB.
-5) 05_renders/audio: render WAV 24-bit 48 kHz; picos ≤ −3 dBFS.
-6) 05_renders/video_mux: remux con vídeo si procede.
-7) 06_docs: anota cambios y LUFS; genera checksums.sha256.
+3) 03_postprocessing: mejoras técnicas (denoise, EQ correctivo, compresión suave).
+4) 04_reaper: crear sesión; importar stems procesados; ruteo y sidechain.
+5) 05_edition: trabajo creativo (retimes por escenas, mezcla 5.1, efectos, ducking).
+6) 06_renders/audio: render final masterizado WAV 24-bit 48 kHz; picos ≤ −3 dBFS.
+7) 06_renders/video_mux: remux con vídeo si procede.
 
 Wildcards útiles de render
 --------------------------
-- Directorio: 05_renders/audio
+- Directorio: 06_renders/audio
 - Nombre: $project_$region_$date_v$projectrendercount
   Ej.: Pelicula_TITULO_ESdub_Dialogo_2025-08-15_v003.wav
 
 Higiene y archivado
 -------------------
-- Limpieza: "File → Clean current project directory…" para purgar huérfanos en 03_reaper/Media.
-- Copia fría: archiva 00_sources, 03_reaper, 05_renders y 06_docs. 01_preproc y 02_stems son recreables.
+- Limpieza: "File → Clean current project directory…" para purgar huérfanos en 04_reaper/Media.
+- Copia fría: archiva 00_sources, 04_reaper, 06_renders. 01_preprocessing, 02_stems, 03_postprocessing y 05_edition son recreables.
 - Verificación rápida: espectrograma y escucha A/B de un minuto crítico entre versiones.
 
 Errores comunes (y cómo evitarlos)
