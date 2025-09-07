@@ -1,0 +1,82 @@
+- [ ] Añadir los capítulos
+- [ ] Añadir subtítulos (Silhouette)
+
+
+## INSTALACION
+Instalar con Homebrew: ffmpeg mkvtoolnix (y quizás sox)
+
+
+## PROCESO
+
+- Exporta DVD a MKV con MakeDVD
+- Convierte pista de audio a FLAC. Será el formato con el que trabajar.
+	ffmpeg -i VIDEO.mkv -map 0:a:0 -c:a flac AUDIO.flac
+- Ajusta el sample rate de la pista en ES: (23,976 fps /25 fps)
+	ffmpeg -i input.flac -ar 48000 -filter:a "atempo=0.95904" output.flac
+- Preparar audios para stems:
+	Recortar y quitar intro y títulos de crédito (para no consumir créditos)
+	En la intro se puede extraer sin gastar créditos (aunque en FLAC 16 bit)
+- Extraer los stems de EN y ES con MVSEP:
+	- Tipo de separación: BS Roformer (vocals, instrumental)
+	- Vocal model type: ver 2025.07 (SDR vocals: 11.89, SDR instrum: 18.20)
+	- Codificación de salida: flac (lossless, 24 bit)
+- Ajustar con Reaper
+	- Cortar los capítulos de ES y ajustar grosso modo
+	- Recortar ES VOX y ajustar sincronía doblage.
+	- Aplicar FX "VST: ReaEQ (Cockos)" a la posta ES VOX para quitar tanto sonido de micrófono:
+		- Banda 1: Type High pass, 80 Hz, -inf dB, 2.00 oct
+		- Banda 2: Type Band, 180 Hz, -3 dB, 1.00 oct
+		- Banda 3: Type Band, 400 Hz, -2 dB, 1.20 oct
+		- Banda 4: Type Low Shelf, 5000 Hz, -3 dB, 2.00 oct
+	- Abrir el Envelope Volume para ajustar volumen en la misma pista.
+- Renderizar audio "SH84_S??E??_ES_MIX_final"
+	- Sampnle rate 48 kHz, Primary output format FLAC 16 bit, Data compressio: 8 - Slowest
+- Remuxear el MKV con todos los archivos (excluyendo 1 pista de subs JA):
+	mkvmerge -o /Users/miguelherrerobaena/Movies/SherlockHolmes_1984/S02E03/04_final/Sherlock_Holmes_1984_S02E03.mkv \
+		--title "Sherlock Holmes - s02e03: The Norwood Builder" \
+		--video-tracks 0 \
+		--no-audio \
+		--disable-track-statistics-tags \
+		--subtitle-tracks 3,5 \
+		--forced-display-flag 3:0 --forced-display-flag 5:0 \
+		--default-track-flag 3:0 --default-track-flag 5:0 \
+		/Users/miguelherrerobaena/Movies/SherlockHolmes_1984/S02E03/00_source/SH84_S02E03_ENJA.mkv \
+		--language 0:spa --default-track-flag 0:1 --disable-track-statistics-tags \
+		/Users/miguelherrerobaena/Movies/SherlockHolmes_1984/S02E03/04_final/SH84_S02E03_ES_MIX_final.flac \
+		--language 0:eng --default-track-flag 0:0 --disable-track-statistics-tags --original-flag 0:1  \
+		/Users/miguelherrerobaena/Movies/SherlockHolmes_1984/S02E03/04_final/SH84_S02E03_EN_MIX.flac \
+		--language 0:jpn --default-track-flag 0:0 --disable-track-statistics-tags  \
+		/Users/miguelherrerobaena/Movies/SherlockHolmes_1984/S02E03/04_final/SH84_S02E03_JA_MIX.flac \
+		--track-order 0:0,1:0,2:0,3:0,0:5,0:3
+
+## ARCHIVOS
+
+Sources
+- MKV original: SH84_S02E03.mkv
+- Audio ES original: SH84_S02E03_ES_DVD.flac
+- Audio EN original: SH84_S02E03_EN.flac
+- Audio JA original: SH84_S02E03_JA.flac
+
+Preprocessing
+- Audio ES resampleado: SH84_S02E03_ES_23976.flac
+- Audio ES para MVsep (cortado con Reaper): SH84_S02E03_ES_23976_for-split.flac
+- Audio EN para MVsep (cortado con Reaper): SH84_S02E03_EN_for-split.flac
+
+Stems
+- Stems EN para Reaper: 2
+- Stems ES para Reaper: 4 (2 + intro + episode)
+
+Renders
+- MIX final ES: SH84_S02E03_ES_MIX_final.flac
+- MKV final: Sherlock Holmes.s02e03.The Norwood Builder.mkv
+
+## CHANGELOG
+
+- Añadir un CHANGELOG
+	Ver qué attachments tiene:
+		mkvmerge -i final.mkv
+			Attachment ID 1: type 'text/plain', size 1234 bytes, file name 'changelog.txt'
+	Eliminar el anterior
+		mkvpropedit final.mkv --delete-attachment 1
+	Añadir el attachment
+		mkvpropedit final.mkv --add-attachment changelog.txt
